@@ -1,0 +1,7 @@
+{
+  "versionCode": 16,
+  "versionName": "1.0",
+  "apk": "https://github.com/iambabarmanzoor/Drift/releases/download/build-16/Drift.apk",
+  "sha256": "e373a9dc9a26d5a2d18c47ffc5dfd6a2ba6d80714ff7514d4394262eee432d87",
+  "notes": "First version with over-the-air updates."
+}
