@@ -570,6 +570,11 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
         return null;
     }
 
+    @Override public void returnHome() {
+        try { startActivity(new Intent(this, Launcher.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)); }
+        catch (Exception ignored) { }
+    }
+
     @Override public void needStorage() {
         // ask on first need, and again (once per start) until the user says "don't ask again"
         if (storageAskedThisRun) return;

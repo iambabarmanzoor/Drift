@@ -25,7 +25,7 @@ owner, repo = m.group(1), m.group(2)
 if owner == "OWNER":
     sys.exit("Set your GitHub user in Updater.UPDATE_URL first.")
 sha = hashlib.sha256(open(apk, "rb").read()).hexdigest()
-tag = "build-%d" % code
+tag = "v" + name  # standard release tags: v1.0.1, v1.1.0 ... (build 16 was published as build-16)
 info = {
     "versionCode": code,
     "versionName": name,

@@ -143,7 +143,7 @@ public class SettingsPanel extends HomeLayout {
         title.setTextSize(38 * s);
         c.drawText("Settings", ox + 44 * s, oy + 34 * s + 38 * s * 0.93f, title);
         foot.setTextSize(11 * s);
-        c.drawText("DRIFT 1.0  ·  DESIGNED AND BUILT BY BABAR MANZOOR", ox + 44 * s, oy + 661 * s, foot);
+        c.drawText("DRIFT " + host.versionName() + "  \u00B7  DESIGNED AND BUILT BY BABAR MANZOOR", ox + 44 * s, oy + 661 * s, foot);
     }
 
     // ------------------------------------------------------------------ tiles

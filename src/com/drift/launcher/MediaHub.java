@@ -46,6 +46,8 @@ public class MediaHub {
         void launchPreferred();
         /** A song's length and cover need storage access: ask for it (once). */
         void needStorage();
+        /** Bring Drift back to the front (after briefly opening the player to wake it). */
+        void returnHome();
     }
 
     private final Context ctx;
@@ -392,6 +394,48 @@ public class MediaHub {
         return SystemClock.elapsedRealtime() < holdUntil ? cardPlaying : audio.isMusicActive();
     }
 
+    /**
+     * After the car starts, a player like VLC shows its last song but its playback engine is asleep,
+     * so "play" through its session does nothing. If nothing plays shortly after a play press:
+     *   1. send the media PLAY key (Android routes it to the player, which wakes up and resumes);
+     *   2. if still silent, open the player for a moment, press play there, and come back home.
+     */
+    private int resumeTry;
+    private void resumeWatch(final String pkg) {
+        final int my = ++resumeTry;
+        main.postDelayed(new Runnable() {
+            @Override public void run() {
+                if (!started || my != resumeTry || nowPlaying()) return;
+                key(KeyEvent.KEYCODE_MEDIA_PLAY);
+                main.postDelayed(new Runnable() {
+                    @Override public void run() {
+                        if (my != resumeTry || nowPlaying() || pkg == null) return;
+                        Intent open = ctx.getPackageManager().getLaunchIntentForPackage(pkg);
+                        if (open == null) return;
+                        try { ctx.startActivity(open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); } catch (Exception e) { return; }
+                        main.postDelayed(new Runnable() {
+                            @Override public void run() {
+                                if (my != resumeTry) return;
+                                MediaController c = controller;
+                                if (!nowPlaying()) {
+                                    if (c != null && pkg.equals(c.getPackageName())) c.getTransportControls().play();
+                                    else key(KeyEvent.KEYCODE_MEDIA_PLAY);
+                                }
+                                main.postDelayed(new Runnable() { @Override public void run() { if (my == resumeTry) player.returnHome(); } }, 1200);
+                            }
+                        }, 1800);
+                    }
+                }, 1500);
+            }
+        }, 1200);
+    }
+
+    private boolean nowPlaying() {
+        MediaController c = controller;
+        PlaybackState s = c == null ? null : c.getPlaybackState();
+        return (s != null && s.getState() == PlaybackState.STATE_PLAYING) || audio.isMusicActive();
+    }
+
     /** Previous restarts the song (or goes back one): either way it plays from the start. */
     private void restartClock() { clockPos = 0; clockAt = SystemClock.elapsedRealtime(); main.postDelayed(new Runnable() { @Override public void run() { if (started && controller == null) refresh(); } }, 500); }
 
@@ -483,10 +527,12 @@ public class MediaHub {
 
     public void playPause() {
         main.removeCallbacks(launchIfSilent);
+        resumeTry++; // any new press cancels a pending wake-up
         if (controller != null) {
             PlaybackState s = controller.getPlaybackState();
-            if (s != null && s.getState() == PlaybackState.STATE_PLAYING) controller.getTransportControls().pause();
-            else controller.getTransportControls().play();
+            if (s != null && s.getState() == PlaybackState.STATE_PLAYING) { controller.getTransportControls().pause(); return; }
+            controller.getTransportControls().play();
+            resumeWatch(controller.getPackageName());
             return;
         }
         String target = targetPkg();
@@ -526,6 +572,7 @@ public class MediaHub {
 
     public void next() {
         main.removeCallbacks(launchIfSilent);
+        resumeTry++; // any new press cancels a pending wake-up
         if (controller != null) { controller.getTransportControls().skipToNext(); return; }
         String target = targetPkg();
         if (target != null && noteAction(target, A_NEXT)) { restartClock(); return; }
@@ -535,6 +582,7 @@ public class MediaHub {
 
     public void prev() {
         main.removeCallbacks(launchIfSilent);
+        resumeTry++; // any new press cancels a pending wake-up
         if (controller != null) { controller.getTransportControls().skipToPrevious(); return; }
         String target = targetPkg();
         if (target != null && noteAction(target, A_PREV)) { restartClock(); return; }
