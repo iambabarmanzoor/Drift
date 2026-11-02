@@ -1,7 +1,7 @@
 {
-  "versionCode": 16,
-  "versionName": "1.0",
-  "apk": "https://github.com/iambabarmanzoor/Drift/releases/download/build-16/Drift.apk",
-  "sha256": "e373a9dc9a26d5a2d18c47ffc5dfd6a2ba6d80714ff7514d4394262eee432d87",
-  "notes": "First version with over-the-air updates."
+  "versionCode": 17,
+  "versionName": "1.0.1",
+  "apk": "https://github.com/iambabarmanzoor/Drift/releases/download/v1.0.1/Drift.apk",
+  "sha256": "e533e6ab628504264fea955e08dbd1f45bd88f940270bc53556b1007eb7c61a4",
+  "notes": "Fix: the play button now wakes up music apps that are asleep after the car starts, so your song resumes from Drift."
 }
