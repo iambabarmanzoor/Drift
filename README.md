@@ -7,10 +7,11 @@ Designed and built by **Babar Manzoor**. © 2026 Babar Manzoor. All rights reser
 ## What it does
 
 - **Music card:** song, artist, cover and progress from your music player, with big previous / play-pause / next buttons. Works best with players that share full song details, such as VLC or Poweramp.
+- **Drift Music:** a built-in player for your USB stick and the unit's storage. Search, favourites and playlists you can name and edit, a spinning record when a song has no cover, and it picks up where you left off when the car starts. Search and typing work only when parked.
 - **Clock and date.**
 - **Shortcuts:** 3 pages of 4 apps.
 - **Speed:** read from the unit's GPS.
-- **Appearance:** 7 accent colours, music card on the left or right, road motion and a moving glow on the dock.
+- **Appearance:** 7 accent colours, music card on the left or right, road motion that follows your speed and a moving glow on the dock.
 - **Recent apps button.**
 - **Updates:** installs over the internet, so no USB stick is needed after the first install.
 

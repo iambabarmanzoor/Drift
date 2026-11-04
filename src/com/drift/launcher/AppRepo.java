@@ -97,6 +97,8 @@ public class AppRepo {
                     out.add(new App(lab == null ? ri.activityInfo.packageName : cleanLabel(lab.toString(), ri.activityInfo.packageName),
                             new ComponentName(ri.activityInfo.packageName, ri.activityInfo.name)));
                 }
+                // Drift Music lives inside Drift: list it in Drift's own drawer only (no second icon in other launchers)
+                out.add(new App("Drift Music", new ComponentName(self, self + ".MusicActivity")));
                 final Collator col = Collator.getInstance(Locale.getDefault());
                 Collections.sort(out, new Comparator<App>() {
                     @Override public int compare(App a, App b) { return col.compare(a.label, b.label); }

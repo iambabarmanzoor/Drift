@@ -85,6 +85,16 @@ public class MediaHub {
                 @Override public void onActiveSessionsChanged(List<MediaController> list) { refresh(); }
             };
 
+    /** Drift Music changed song or state (also fires once it has restored the last song at start). */
+    private final MusicService.Listener ownChanged = new MusicService.Listener() {
+        private boolean queued;
+        @Override public void onMusicState() {
+            if (queued || !started) return;
+            queued = true; // coalesce bursts (seeking, buffering) into one refresh
+            main.postDelayed(new Runnable() { @Override public void run() { queued = false; if (started) refresh(); } }, 150);
+        }
+    };
+
     private boolean awaitingToggle;
     private final Runnable notifChanged = new Runnable() {
         @Override public void run() { awaitingToggle = false; if (started) refresh(); }
@@ -169,6 +179,7 @@ public class MediaHub {
         card.setNeedsAccess(!access);
         main.removeCallbacks(checkLink);
         MediaWatcher.setListener(notifChanged);
+        MusicService.addListener(ownChanged);
         if (access) {
             MediaSessionManager m = (MediaSessionManager) ctx.getSystemService(Context.MEDIA_SESSION_SERVICE);
             try {
@@ -222,6 +233,7 @@ public class MediaHub {
         main.removeCallbacks(checkLink);
         try { ctx.unregisterReceiver(legacy); } catch (Exception ignored) { }
         MediaWatcher.setListener(null);
+        MusicService.removeListener(ownChanged);
         if (msm != null) {
             try { msm.removeOnActiveSessionsChangedListener(sessions); } catch (Exception ignored) { }
             msm = null;
@@ -249,6 +261,13 @@ public class MediaHub {
         List<MediaController> list = new ArrayList<>();
         if (msm != null) {
             try { list.addAll(msm.getActiveSessions(new ComponentName(ctx, MediaWatcher.class))); } catch (Exception ignored) { }
+        }
+        // Drift's own player is always visible to the card, with or without notification access
+        MusicService own = MusicService.get();
+        if (own != null && own.hasSong() && (own.isPlaying() || ctx.getPackageName().equals(player.preferredPackage()))) {
+            boolean dup = false;
+            for (MediaController m : list) if (m.getSessionToken().equals(own.token())) { dup = true; break; }
+            if (!dup) try { list.add(new MediaController(ctx, own.token())); } catch (Exception ignored) { }
         }
         List<MediaWatcher.Entry> notes = MediaWatcher.entries();
         for (MediaWatcher.Entry e : notes) {
@@ -532,7 +551,7 @@ public class MediaHub {
             PlaybackState s = controller.getPlaybackState();
             if (s != null && s.getState() == PlaybackState.STATE_PLAYING) { controller.getTransportControls().pause(); return; }
             controller.getTransportControls().play();
-            resumeWatch(controller.getPackageName());
+            if (!ctx.getPackageName().equals(controller.getPackageName())) resumeWatch(controller.getPackageName()); // ours wakes itself
             return;
         }
         String target = targetPkg();

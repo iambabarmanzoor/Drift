@@ -54,6 +54,7 @@ public class Sheet extends FrameLayout {
         card.setPadding(0, Math.round(10 * s), 0, Math.round(10 * s));
         LayoutParams lp = (LayoutParams) card.getLayoutParams();
         lp.width = Math.round(520 * s);
+        lp.gravity = Gravity.CENTER; lp.topMargin = 0;
         card.setLayoutParams(lp);
     }
 
@@ -138,6 +139,161 @@ public class Sheet extends FrameLayout {
         show();
     }
 
+    public interface OnChecks { void onDone(boolean[] sel); }
+    public interface OnText { void onText(String text); }
+    private static int accent = 0xFF46AAFF;
+    public static void setAccent(int a) { accent = a; }
+
+    private TextView button(String label, boolean primary, final Runnable r) {
+        TextView b = text(label, 18, 0xFFFFFFFF, "sans-serif-medium", false);
+        b.setGravity(Gravity.CENTER);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(26 * s);
+        if (primary) bg.setColor(accent); else { bg.setColor(0x12FFFFFF); bg.setStroke(Math.max(1, Math.round(s)), 0x1FFFFFFF); }
+        b.setBackground(bg);
+        b.setPadding(Math.round(28 * s), 0, Math.round(28 * s), 0);
+        b.setOnClickListener(new OnClickListener() { @Override public void onClick(View v) { r.run(); } });
+        return b;
+    }
+
+    private LinearLayout buttons(TextView... bs) {
+        LinearLayout row = new LinearLayout(getContext());
+        row.setGravity(Gravity.END);
+        row.setPadding(Math.round(24 * s), Math.round(14 * s), Math.round(24 * s), Math.round(8 * s));
+        for (int i = 0; i < bs.length; i++) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, Math.round(52 * s));
+            if (i > 0) lp.leftMargin = Math.round(12 * s);
+            row.addView(bs[i], lp);
+        }
+        return row;
+    }
+
+    /** Round tick box in the accent colour. */
+    private static final class Check extends View {
+        boolean on; final float s;
+        private final android.graphics.Paint p = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        Check(Context c, float s) { super(c); this.s = s; }
+        @Override protected void onDraw(android.graphics.Canvas c) {
+            float cx = getWidth() / 2f, cy = getHeight() / 2f, r = 15 * s;
+            if (on) {
+                p.setStyle(android.graphics.Paint.Style.FILL); p.setColor(accent); c.drawCircle(cx, cy, r, p);
+                p.setStyle(android.graphics.Paint.Style.STROKE); p.setColor(0xFFFFFFFF); p.setStrokeWidth(3 * s);
+                p.setStrokeCap(android.graphics.Paint.Cap.ROUND); p.setStrokeJoin(android.graphics.Paint.Join.ROUND);
+                android.graphics.Path t = new android.graphics.Path();
+                t.moveTo(cx - 6 * s, cy); t.lineTo(cx - 1.5f * s, cy + 5 * s); t.lineTo(cx + 7 * s, cy - 5 * s);
+                c.drawPath(t, p);
+            } else {
+                p.setStyle(android.graphics.Paint.Style.STROKE); p.setColor(0x66FFFFFF); p.setStrokeWidth(2 * s); c.drawCircle(cx, cy, r - s, p);
+            }
+        }
+    }
+
+    /**
+     * Tick the ones you want, then Done (the "Add to playlist" picker). An optional action button
+     * sits above the list (e.g. "New playlist").
+     */
+    public void checks(String title, String[] labels, String[] subs, boolean[] initial, String topAction, final Runnable onTop, final OnChecks done) {
+        scale();
+        header(title, null);
+        final boolean[] sel = initial.clone();
+        if (topAction != null) {
+            LinearLayout wrap = new LinearLayout(getContext());
+            wrap.setPadding(Math.round(28 * s), 0, Math.round(28 * s), Math.round(10 * s));
+            wrap.addView(button("+  " + topAction, true, new Runnable() { @Override public void run() { dismiss(); onTop.run(); } }),
+                    new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, Math.round(46 * s)));
+            card.addView(wrap);
+        }
+        LinearLayout list = new LinearLayout(getContext());
+        list.setOrientation(LinearLayout.VERTICAL);
+        for (int i = 0; i < labels.length; i++) {
+            final int idx = i;
+            LinearLayout row = new LinearLayout(getContext());
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(Math.round(28 * s), 0, Math.round(22 * s), 0);
+            LinearLayout tx = new LinearLayout(getContext());
+            tx.setOrientation(LinearLayout.VERTICAL);
+            TextView a = text(labels[i], 20, Palette.TEXT, "sans-serif", false); a.setSingleLine(true);
+            tx.addView(a);
+            if (subs != null && subs[i] != null) { TextView b = text(subs[i], 15, Palette.SUB, "sans-serif", false); tx.addView(b); }
+            row.addView(tx, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            final Check ck = new Check(getContext(), s);
+            ck.on = sel[i];
+            row.addView(ck, new LinearLayout.LayoutParams(Math.round(40 * s), Math.round(40 * s)));
+            StateListDrawable sl = new StateListDrawable();
+            sl.addState(new int[] { android.R.attr.state_pressed }, new ColorDrawable(0x14FFFFFF));
+            sl.addState(new int[] {}, new ColorDrawable(0));
+            row.setBackground(sl);
+            row.setOnClickListener(new OnClickListener() { @Override public void onClick(View v) { sel[idx] = !sel[idx]; ck.on = sel[idx]; ck.invalidate(); } });
+            list.addView(row, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, Math.round(72 * s)));
+        }
+        android.widget.ScrollView sv = new android.widget.ScrollView(getContext());
+        sv.addView(list);
+        int maxH = Math.round(Math.min(labels.length * 72, 360) * s);
+        card.addView(sv, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, maxH));
+        card.addView(buttons(
+                button("Cancel", false, new Runnable() { @Override public void run() { dismiss(); } }),
+                button("Done", true, new Runnable() { @Override public void run() { dismiss(); done.onDone(sel); } })));
+        show();
+    }
+
+    /** Ask for a name (new playlist, rename). The card sits high so the keyboard doesn't cover it. */
+    public void input(String title, String initial, String okLabel, String note, final OnText ok) {
+        scale();
+        header(title, null);
+        final android.widget.EditText in = new android.widget.EditText(getContext());
+        in.setText(initial);
+        in.setSingleLine(true);
+        in.setTextColor(0xFFFFFFFF);
+        in.setTextSize(TypedValue.COMPLEX_UNIT_PX, 24 * s);
+        in.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        in.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        in.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE | android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI
+                | android.view.inputmethod.EditorInfo.IME_FLAG_NO_FULLSCREEN);
+        in.setFilters(new android.text.InputFilter[] { new android.text.InputFilter.LengthFilter(40) });
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0x0AFFFFFF); bg.setCornerRadius(16 * s); bg.setStroke(Math.max(1, Math.round(1.5f * s)), accent);
+        in.setBackground(bg);
+        in.setPadding(Math.round(18 * s), 0, Math.round(18 * s), 0);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, Math.round(60 * s));
+        lp.leftMargin = lp.rightMargin = Math.round(28 * s);
+        card.addView(in, lp);
+        if (note != null) {
+            TextView n = text(note, 15, Palette.SUB, "sans-serif", false);
+            n.setPadding(Math.round(28 * s), Math.round(10 * s), Math.round(28 * s), 0);
+            card.addView(n);
+        }
+        final Runnable go = new Runnable() {
+            @Override public void run() {
+                String t = in.getText().toString().trim();
+                hideKeys(in); dismiss();
+                ok.onText(t.isEmpty() ? initial : t);
+            }
+        };
+        in.setOnEditorActionListener(new TextView.OnEditorActionListener() {
+            @Override public boolean onEditorAction(TextView v, int id, android.view.KeyEvent e) { go.run(); return true; }
+        });
+        card.addView(buttons(
+                button("Cancel", false, new Runnable() { @Override public void run() { hideKeys(in); dismiss(); } }),
+                button(okLabel, true, go)));
+        LayoutParams clp = (LayoutParams) card.getLayoutParams();
+        clp.gravity = Gravity.CENTER_HORIZONTAL | Gravity.TOP;
+        clp.topMargin = Math.round(70 * s);
+        card.setLayoutParams(clp);
+        show();
+        in.requestFocus();
+        in.selectAll();
+        try { ((android.app.Activity) getContext()).getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING); } catch (Throwable ignored) { }
+        in.postDelayed(new Runnable() { @Override public void run() {
+            android.view.inputmethod.InputMethodManager im = (android.view.inputmethod.InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+            if (im != null) im.showSoftInput(in, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+        } }, 120);
+    }
+
+    private void hideKeys(View v) {
+        android.view.inputmethod.InputMethodManager im = (android.view.inputmethod.InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (im != null) im.hideSoftInputFromWindow(v.getWindowToken(), 0);
+    }
+
     private static final Runnable NOOP = new Runnable() { @Override public void run() { } };
 
     private void show() {
@@ -152,6 +308,8 @@ public class Sheet extends FrameLayout {
     public void dismiss() {
         if (!showing) return;
         showing = false;
+        View f = findFocus();
+        if (f != null) hideKeys(f);
         animate().alpha(0f).setDuration(120).withEndAction(new Runnable() {
             @Override public void run() { if (!showing) setVisibility(GONE); }
         }).start();

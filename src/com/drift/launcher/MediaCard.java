@@ -121,7 +121,14 @@ public class MediaCard extends View {
     /** Card on the right: the ring buttons in the mirrored artwork sit 8 units further left. */
     public void setOnRight(boolean b) { bs = b ? -8f : 0f; invalidate(); }
 
+    private final Vinyl vinyl = new Vinyl();
+    private int accent = 0xFF46AAFF;
+    private final Runnable vinylTick = new Runnable() {
+        @Override public void run() { invalidate((int) artR.left - 2, (int) artR.top - 2, (int) artR.right + 2, (int) artR.bottom + 2); }
+    };
+
     public void setAccent(Accent a) {
+        accent = a.glow();
         artEdge.setColor((a.rim() & 0x00FFFFFF) | 0xAA000000);
         fill.setColor(a.fill());
         fillGlow.setColor((a.deep() & 0x00FFFFFF) | 0x40000000);
@@ -237,9 +244,9 @@ public class MediaCard extends View {
         // cover
         float ar = 14 * k;
         if (art != null) c.drawRoundRect(artR, ar, ar, artPaint);
-        else {
-            c.drawRoundRect(artR, ar, ar, artEmpty);
-            Icons.note(c, artR.centerX(), artR.centerY(), 64 * k, noteP);
+        else if (vinyl.draw(c, artR, ar, accent, playing) && isShown()) {
+            // no cover: the spinning record, redrawn at ~30 fps while it turns
+            removeCallbacks(vinylTick); postDelayed(vinylTick, 33);
         }
         c.drawRoundRect(artR, ar, ar, artEdge);
         if (pressed == HIT_ART) c.drawRoundRect(artR, ar, ar, pressedArt);
@@ -328,6 +335,7 @@ public class MediaCard extends View {
         }
         if (seekable && y > (BAR_T - 18) * k && y < (BAR_B + 18) * k && pos >= 0 && dur > 0) return HIT_SEEK;
         if (x > artR.left - 8 * k && x < artR.right + 8 * k && y > artR.top - 8 * k && y < artR.bottom + 8 * k) return HIT_ART;
+        if (x > TEXT_X * k && x < (TEXT_X + TEXT_W) * k && y > 55 * k && y < 175 * k) return HIT_ART; // title and artist open the player too
         return HIT_NONE;
     }
 
@@ -394,6 +402,7 @@ public class MediaCard extends View {
     @Override protected void onDetachedFromWindow() {
         removeCallbacks(progressTick);
         removeCallbacks(longPress);
+        removeCallbacks(vinylTick);
         super.onDetachedFromWindow();
     }
 

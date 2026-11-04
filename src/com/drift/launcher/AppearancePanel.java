@@ -139,7 +139,7 @@ public class AppearancePanel extends HomeLayout {
                 c.drawText(Accent.ALL[i].name, cx, cy + (29 + 25) * k, name);
             }
 
-            segment(c, "ROAD MOTION", Y_MOTION, new String[] { "Off", "Cruise", "Motorway" }, host.roadMode(), 10);
+            segment(c, "ROAD MOTION", Y_MOTION, new String[] { "Off", "Follow speed", "Always" }, host.roadMode(), 10);
             segment(c, "DOCK GLOW", Y_GLOW, new String[] { "Off", "On" }, host.dockGlow() ? 1 : 0, 20);
             segment(c, "MUSIC CARD", Y_SIDE, new String[] { "Left", "Right" }, host.cardRight() ? 1 : 0, 30);
         }

@@ -20,7 +20,7 @@ ATTR = {
     "screenOrientation": 0x0101001e, "configChanges": 0x0101001f, "stateNotNeeded": 0x01010016,
     "clearTaskOnLaunch": 0x01010015, "minSdkVersion": 0x0101020c, "versionCode": 0x0101021b,
     "versionName": 0x0101021c, "targetSdkVersion": 0x01010270, "allowBackup": 0x01010280,
-    "hardwareAccelerated": 0x010102d3, "required": 0x0101028e, "authorities": 0x01010018, "grantUriPermissions": 0x0101001b,
+    "hardwareAccelerated": 0x010102d3, "required": 0x0101028e, "authorities": 0x01010018, "grantUriPermissions": 0x0101001b, "excludeFromRecents": 0x01010017,
 }
 T_REF, T_STR, T_DEC, T_HEX, T_BOOL = 0x01, 0x03, 0x10, 0x11, 0x12
 ICON_ID = 0x7F010000
@@ -32,7 +32,7 @@ def A(name, typ, val):  # android-namespaced attribute
 def P(name, typ, val):  # attribute without namespace
     return (None, name, typ, val)
 
-MANIFEST = ("manifest", [P("package", T_STR, PKG), A("versionCode", T_DEC, 17), A("versionName", T_STR, "1.0.1")], [
+MANIFEST = ("manifest", [P("package", T_STR, PKG), A("versionCode", T_DEC, 18), A("versionName", T_STR, "1.1.0")], [
     ("uses-sdk", [A("minSdkVersion", T_DEC, 23), A("targetSdkVersion", T_DEC, 25)], []),
     ("uses-permission", [A("name", T_STR, "android.permission.BLUETOOTH")], []),
     ("uses-permission", [A("name", T_STR, "android.permission.ACCESS_NETWORK_STATE")], []),
@@ -40,6 +40,7 @@ MANIFEST = ("manifest", [P("package", T_STR, PKG), A("versionCode", T_DEC, 17), 
     ("uses-permission", [A("name", T_STR, "android.permission.ACCESS_COARSE_LOCATION")], []),
     ("uses-permission", [A("name", T_STR, "android.permission.READ_EXTERNAL_STORAGE")], []),
     ("uses-permission", [A("name", T_STR, "android.permission.INTERNET")], []),
+    ("uses-permission", [A("name", T_STR, "android.permission.WAKE_LOCK")], []),
     ("uses-feature", [A("name", T_STR, "android.hardware.location.gps"), A("required", T_BOOL, False)], []),
     ("application", [
         A("theme", T_REF, THEME_MATERIAL_NOACTIONBAR), A("label", T_STR, "Drift"), A("icon", T_REF, ICON_ID),
@@ -63,6 +64,10 @@ MANIFEST = ("manifest", [P("package", T_STR, PKG), A("versionCode", T_DEC, 17), 
                 ("action", [A("name", T_STR, "android.service.notification.NotificationListenerService")], []),
             ]),
         ]),
+        ("activity", [
+            A("label", T_STR, "Drift Music"), A("name", T_STR, PKG + ".MusicActivity"), A("exported", T_BOOL, True),
+            A("theme", T_REF, 0x0103000F), A("excludeFromRecents", T_BOOL, True)], []),
+        ("service", [A("name", T_STR, PKG + ".MusicService"), A("exported", T_BOOL, False)], []),
         ("provider", [
             A("name", T_STR, PKG + ".ApkProvider"), A("authorities", T_STR, PKG + ".update"),
             A("exported", T_BOOL, False), A("grantUriPermissions", T_BOOL, True)], []),
@@ -194,6 +199,13 @@ def encode_arsc():
 # ---------------------------------------------------------------- icon
 def make_icon(size=192):
     from PIL import Image, ImageDraw, ImageFilter
+    import os
+    srcp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon_source.png")
+    if os.path.isfile(srcp):  # the app icon artwork (rounded square, transparent corners)
+        final = Image.open(srcp).convert("RGBA").resize((size, size), Image.LANCZOS)
+        out = io.BytesIO()
+        final.save(out, "PNG", optimize=True)
+        return out.getvalue(), final
     S = size * 4
     img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     # dark squircle base

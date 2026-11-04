@@ -64,6 +64,9 @@ public class SpeedView extends View implements LocationListener {
 
     public void setMph(boolean b) { mph = b; invalidate(); }
 
+    /** Current speed in km/h, 0 when parked or there is no GPS fix. */
+    public float kmh() { return kmh < 0 ? 0f : kmh; }
+
     private void applyGlow() { num.setShadowLayer(12f * k, 0, 0, (glow & 0x00FFFFFF) | 0xC0000000); }
 
     @Override protected void onSizeChanged(int w, int h, int ow, int oh) {

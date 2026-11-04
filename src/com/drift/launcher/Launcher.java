@@ -31,7 +31,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
-public class Launcher extends Activity implements DrawerView.Host, MediaCard.Actions, MediaHub.Player, SettingsPanel.Host {
+public class Launcher extends Activity implements DrawerView.Host, MediaCard.Actions, MediaHub.Player, SettingsPanel.Host, MusicPanel.Host {
+    public static final String ACTION_MUSIC = "com.drift.launcher.MUSIC";
+    private MusicPanel music;
     private static final int SLOTS = 12, PER_PAGE = 4; // 3 swipeable pages of 4
     static final int PICK_PLAYER = -2;
     private static final String NOTIF_SETTINGS = "android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS";
@@ -70,7 +72,7 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
     private final Runnable ticker = new Runnable() {
         @Override public void run() {
             if (!ticking) return;
-            boolean covered = settings.isOpen() || drawer.isOpen() || !screenOn;
+            boolean covered = settings.isOpen() || drawer.isOpen() || music.isOpen() || !screenOn;
             if (!covered) {
                 if (road.isActive()) road.invalidate();
                 if (dockGlow.isActive()) dockGlow.invalidate();
@@ -114,7 +116,7 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
         super.onCreate(b);
         prefs = getSharedPreferences("drift", MODE_PRIVATE);
         themeIdx = prefs.getInt("accent", 0);
-        roadMode = prefs.getInt("road", prefs.getBoolean("motion", true) ? RoadView.CRUISE : RoadView.OFF);
+        roadMode = prefs.getInt("road", prefs.getBoolean("motion", true) ? RoadView.SPEED : RoadView.OFF);
         glow = prefs.getBoolean("glow", true);
         mph = prefs.getBoolean("mph", false);
         flip = prefs.getBoolean("flip", false);
@@ -214,12 +216,15 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
         });
         speed = new SpeedView(this); // drawn over the dock's centre; taps fall through to the dock
         speed.setMph(mph);
+        road.setSpeedSource(speed);
         home.add(speed, 540, 600, 200, 90);
         root.addView(home, new FrameLayout.LayoutParams(-1, -1));
 
         appearance = new AppearancePanel(this, this);
         appearance.setOnLeft(flip);
         root.addView(appearance, new FrameLayout.LayoutParams(-1, -1));
+        music = new MusicPanel(this, this);
+        root.addView(music, new FrameLayout.LayoutParams(-1, -1));
         settings = new SettingsPanel(this, this);
         root.addView(settings, new FrameLayout.LayoutParams(-1, -1));
         drawer = new DrawerView(this, repo, this); // above settings: it's also the app picker
@@ -228,6 +233,12 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
         root.addView(sheet, new FrameLayout.LayoutParams(-1, -1));
 
         setContentView(root);
+        // 1.1.0: Drift Music becomes the music app (once; the user can pick another in Settings)
+        if (!prefs.getBoolean("musicDefault110", false)) {
+            prefs.edit().putBoolean("musicDefault110", true).putString("player", getPackageName()).apply();
+            prefCached = false;
+        }
+        MusicService.start(this);
         media = new MediaHub(this, card, this);
         applyTheme();
         road.setMode(roadMode);
@@ -244,6 +255,13 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
         mf.addAction(Intent.ACTION_EXTERNAL_APPLICATIONS_AVAILABLE);
         mf.addAction(Intent.ACTION_EXTERNAL_APPLICATIONS_UNAVAILABLE);
         registerReceiver(pkgRx, mf);
+        IntentFilter sf = new IntentFilter();
+        sf.addAction(Intent.ACTION_MEDIA_MOUNTED);
+        sf.addAction(Intent.ACTION_MEDIA_UNMOUNTED);
+        sf.addAction(Intent.ACTION_MEDIA_REMOVED);
+        sf.addDataScheme("file");
+        registerReceiver(mountRx, sf);
+        if (ACTION_MUSIC.equals(getIntent().getAction())) openMusic();
 
         reloadApps();
     }
@@ -265,6 +283,7 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
         status.refresh();
         road.start();
         dockGlow.start();
+        music.resumed();
         screenOn = true;
         startTicker();
         media.start();
@@ -281,7 +300,7 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
 
     @Override public void onRequestPermissionsResult(int req, String[] perms, int[] res) {
         if (req == REQ_LOCATION && SpeedView.hasPermission(this)) speed.start();
-        if (req == REQ_STORAGE && TrackInfo.allowed(this)) { TrackInfo.forget(); media.refreshNow(); }
+        if (req == REQ_STORAGE && TrackInfo.allowed(this)) { TrackInfo.forget(); media.refreshNow(); music.refreshLibrary(); }
         settings.refresh();
         settings.refresh();
     }
@@ -290,6 +309,7 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
         super.onPause();
         try { unregisterReceiver(timeRx); } catch (Exception ignored) { }
         stopTicker();
+        music.paused();
         road.stop();
         dockGlow.stop();
         speed.stop();
@@ -326,7 +346,7 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
     private void openRecents() {
         if (RecentsService.showRecents()) { recentsFails = 0; return; }
         if (RecentsService.isEnabled(this) && recentsFails++ == 0) {
-            Toast.makeText(this, "Recent apps is starting, try again in a moment", Toast.LENGTH_SHORT).show();
+            toast("Recent apps is starting, try again in a moment", false);
             return;
         }
         recentsFails = 0;
@@ -337,11 +357,18 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
         if (openDialog != null) openDialog.dismiss();
         repo.shutdown();
         try { unregisterReceiver(pkgRx); } catch (Exception ignored) { }
+        try { unregisterReceiver(mountRx); } catch (Exception ignored) { }
         super.onDestroy();
     }
 
+    /** A USB stick was plugged in or removed: refresh Drift Music's library. */
+    private final BroadcastReceiver mountRx = new BroadcastReceiver() {
+        @Override public void onReceive(Context c, Intent i) { music.refreshLibrary(); }
+    };
+
     @Override protected void onNewIntent(Intent i) {
         super.onNewIntent(i);
+        if (ACTION_MUSIC.equals(i.getAction())) { if (sheet.isShowing()) sheet.dismiss(); closePanels(); openMusic(); return; }
         // Home button closes whatever is open
         if (sheet.isShowing()) sheet.dismiss();
         closePanels();
@@ -352,6 +379,7 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
     @Override public void onBackPressed() {
         if (sheet.isShowing()) sheet.dismiss(); // never leave the home screen
         else if (drawer.isOpen()) drawer.close();
+        else if (music.isOpen()) { if (!music.back()) music.close(); }
         else if (appearance.isOpen()) openSettings();
         else if (settings.isOpen()) settings.close();
     }
@@ -382,6 +410,8 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
         drawer.setPalette(palette);
         settings.setAccent(a);
         appearance.setAccent(a);
+        music.setAccent(a);
+        Sheet.setAccent(a.glow());
     }
 
     // ---------- apps & shortcuts ----------
@@ -477,13 +507,14 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
     }
 
     private void launch(AppRepo.App a, View from) {
+        if (a.cn.getPackageName().equals(getPackageName())) { drawer.close(); openMusic(); return; } // "Drift Music" in All apps
         Intent i = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(a.cn)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
         try {
             Bundle opts = from == null ? null : ActivityOptions.makeScaleUpAnimation(from, 0, 0, from.getWidth(), from.getHeight()).toBundle();
             startActivity(i, opts);
         } catch (Exception e) {
-            Toast.makeText(this, "Can't open " + a.label, Toast.LENGTH_SHORT).show();
+            toast("Can't open " + a.label, false);
         }
     }
 
@@ -494,7 +525,17 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
         for (AppRepo.App a : repo.apps()) {
             if ("NAVIGATION".equals(TileView.guessCategory(a))) { launch(a, roadZone); return; }
         }
-        if (first != null) launch(first, roadZone);
+        // any app that can show a map location (navigation apps with unusual names)
+        try {
+            java.util.List<android.content.pm.ResolveInfo> maps = getPackageManager().queryIntentActivities(
+                    new Intent(Intent.ACTION_VIEW, android.net.Uri.parse("geo:0,0")), 0);
+            for (android.content.pm.ResolveInfo ri : maps) {
+                Intent li = getPackageManager().getLaunchIntentForPackage(ri.activityInfo.packageName);
+                if (li != null && !ri.activityInfo.packageName.equals(getPackageName()) && start(li)) return;
+            }
+        } catch (Throwable ignored) { }
+        // never fall back to an unrelated app (it used to open shortcut 1, often the music app)
+        toast("No navigation app installed", false);
     }
 
     private boolean start(Intent i) {
@@ -563,9 +604,17 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
                 || pkg.startsWith("com.amazon") || pkg.startsWith("com.deezer") || pkg.startsWith("com.soundcloud");
     }
 
+    private boolean driftMusic() { return getPackageName().equals(preferredPackage()); }
+
+    private void openMusic() {
+        if (!TrackInfo.allowed(this)) allowStorage();
+        music.show();
+    }
+
     private String playerLabel() {
         String p = preferredPackage();
         if (p == null) return null;
+        if (p.equals(getPackageName())) return "Drift Music";
         for (AppRepo.App a : repo.apps()) if (a.cn.getPackageName().equals(p)) return a.label;
         return null;
     }
@@ -586,6 +635,11 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
     }
 
     @Override public void launchPreferred() {
+        if (driftMusic()) {
+            MusicService s = MusicService.get();
+            if (s != null && s.hasSong()) s.play(); else openMusic();
+            return;
+        }
         String p = preferredPackage();
         if (p != null) {
             Intent i = getPackageManager().getLaunchIntentForPackage(p);
@@ -595,8 +649,19 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
     }
 
     private void chooseMusicAppNow() {
-        if (repo.apps().isEmpty()) { clock.flash("LOADING APPS"); return; }
-        drawer.show(PICK_PLAYER);
+        sheet.list("Your music app", new String[] { "Drift Music (built in)", "Another app\u2026" }, new Sheet.OnPick() {
+            @Override public void onPick(int i) {
+                if (i == 0) {
+                    prefs.edit().putString("player", getPackageName()).apply();
+                    prefCached = false;
+                    card.setPlayerName("Drift Music");
+                    settings.refresh();
+                } else {
+                    if (repo.apps().isEmpty()) { clock.flash("LOADING APPS"); return; }
+                    drawer.show(PICK_PLAYER);
+                }
+            }
+        });
     }
 
     @Override public void onAppLongPress(final AppRepo.App app) {
@@ -625,7 +690,7 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
                 saveSlot(i, app.key);
                 shortcuts.setPage(i / PER_PAGE, true);
                 drawer.close();
-                Toast.makeText(this, app.label + " pinned", Toast.LENGTH_SHORT).show();
+                toast(app.label + " pinned", false);
                 return;
             }
         }
@@ -649,8 +714,9 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
     @Override public void onSeek(long ms) { media.seekTo(ms); }
 
     @Override public void onCardTap() {
-        if (!MediaHub.hasAccess(this) || !MediaWatcher.connected) { askAccess(); return; }
         String pkg = media.playingPackage();
+        if (getPackageName().equals(pkg) || (pkg == null && driftMusic())) { openMusic(); return; }
+        if (!MediaHub.hasAccess(this) || !MediaWatcher.connected) { askAccess(); return; }
         if (pkg != null) {
             Intent i = getPackageManager().getLaunchIntentForPackage(pkg);
             if (i != null && start(i)) return;
@@ -684,7 +750,7 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
                     @Override public void run() {
                         if (!start(new Intent(NOTIF_SETTINGS))) {
                             start(new Intent(Settings.ACTION_SETTINGS));
-                            Toast.makeText(Launcher.this, "Look for Notification access, then enable Drift", Toast.LENGTH_LONG).show();
+                            toast("Look for Notification access, then enable Drift", true);
                         }
                     }
                 }, "Not now");
@@ -758,7 +824,7 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
             }
         });
     }
-    private void allowStorage() {
+    @Override public void allowStorage() {
         String perm = android.Manifest.permission.READ_EXTERNAL_STORAGE;
         if (TrackInfo.allowed(this) || shouldShowRequestPermissionRationale(perm) || !prefs.getBoolean("askedStorage", false)) {
             prefs.edit().putBoolean("askedStorage", true).apply();
@@ -766,7 +832,7 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
             else requestPermissions(new String[] { perm }, REQ_STORAGE);
         } else {
             start(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName())));
-            Toast.makeText(this, "Turn on Storage under Permissions", Toast.LENGTH_LONG).show();
+            toast("Turn on Storage under Permissions", true);
         }
     }
 
@@ -818,7 +884,7 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
         } else {
             // "don't ask again" was chosen (or the dialog never showed): the app's settings page can always change it
             start(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName())));
-            Toast.makeText(this, "Turn on Location under Permissions", Toast.LENGTH_LONG).show();
+            toast("Turn on Location under Permissions", true);
         }
     }
     @Override public void setMph(boolean b) {
@@ -846,7 +912,44 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
     }
     @Override public void openAppearance() { settings.hideNow(); appearance.show(); }
     @Override public void openSettings() { appearance.close(); settings.show(); }
-    @Override public void closePanels() { if (appearance.isOpen()) appearance.close(); if (settings.isOpen()) settings.close(); }
+    @Override public void closePanels() { if (appearance.isOpen()) appearance.close(); if (settings.isOpen()) settings.close(); if (music != null && music.isOpen()) music.close(); }
+
+    // ---------- MusicPanel.Host ----------
+    @Override public void musicSheet(String title, String[] items, Sheet.OnPick pick) { sheet.list(title, items, pick); }
+    @Override public void musicChecks(String title, String[] labels, String[] subs, boolean[] sel, String top, Runnable onTop, Sheet.OnChecks done) { sheet.checks(title, labels, subs, sel, top, onTop, done); }
+    @Override public void musicInput(String title, String initial, String ok, String note, Sheet.OnText done) { sheet.input(title, initial, ok, note, done); }
+    private Toast lastToast;
+    /** Drift-styled toast: the system one is a light pill that hides white theme text on some units. */
+    @Override public void musicToast(String text) { toast(text, false); }
+
+    void toast(String text, boolean longer) {
+        try {
+            float d = getResources().getDisplayMetrics().density;
+            android.widget.TextView tv = new android.widget.TextView(this);
+            tv.setText(text);
+            tv.setTextColor(0xFFFFFFFF);
+            tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, 20 * d);
+            tv.setTypeface(Fonts.regular(this));
+            tv.setPadding(Math.round(28 * d), Math.round(14 * d), Math.round(28 * d), Math.round(14 * d));
+            android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+            bg.setColor(0xF0121A26);
+            bg.setCornerRadius(40 * d);
+            bg.setStroke(Math.max(1, Math.round(d)), 0x33FFFFFF);
+            tv.setBackground(bg);
+            if (lastToast != null) lastToast.cancel();
+            Toast t = new Toast(this);
+            t.setView(tv);
+            t.setDuration(longer ? Toast.LENGTH_LONG : Toast.LENGTH_SHORT);
+            t.setGravity(android.view.Gravity.BOTTOM | android.view.Gravity.CENTER_HORIZONTAL, 0, Math.round(40 * d));
+            t.show();
+            lastToast = t;
+        } catch (Throwable e) {
+            Toast.makeText(this, text, longer ? Toast.LENGTH_LONG : Toast.LENGTH_SHORT).show();
+        }
+    }
+    @Override public void musicClose() { music.close(); }
+    @Override public boolean storageAllowed() { return TrackInfo.allowed(this); }
+    @Override public float speedKmh() { return speed == null ? 0f : speed.kmh(); }
     @Override public void resetShortcuts() {
         sheet.list("Reset shortcuts?", new String[] { "!Reset to suggested apps", "Cancel" }, new Sheet.OnPick() {
             @Override public void onPick(int i) {

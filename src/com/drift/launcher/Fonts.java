@@ -9,7 +9,7 @@ import android.graphics.Typeface;
 
 /** Inter (SIL Open Font License), bundled so the screen matches the reference design. */
 public final class Fonts {
-    private static Typeface light, regular, semibold;
+    private static Typeface light, regular, semibold, bold;
 
     private static Typeface load(Context c, String file, String fallback) {
         try { return Typeface.createFromAsset(c.getAssets(), file); }
@@ -18,5 +18,6 @@ public final class Fonts {
 
     public static Typeface light(Context c) { if (light == null) light = load(c, "Inter-300.ttf", "sans-serif-light"); return light; }
     public static Typeface regular(Context c) { if (regular == null) regular = load(c, "Inter-400.ttf", "sans-serif"); return regular; }
+    public static Typeface bold(Context c) { if (bold == null) bold = load(c, "Inter-700.ttf", "sans-serif-medium"); return bold; }
     public static Typeface semibold(Context c) { if (semibold == null) semibold = load(c, "Inter-600.ttf", "sans-serif-medium"); return semibold; }
 }

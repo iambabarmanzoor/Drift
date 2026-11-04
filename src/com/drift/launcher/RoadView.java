@@ -16,16 +16,20 @@ import android.view.View;
 
 /**
  * Road motion drawn over the artwork: light running down both lane lines (the car is moving
- * forward) and the tail lights slowly breathing. Design area 400 x 560 at x=440, y=40.
+ * forward, at the car's GPS speed) and the tail lights slowly breathing. Design area 400 x 560 at x=440, y=40.
  * Launcher's single ~30 fps ticker redraws it, only while the home screen is in front.
  */
 public class RoadView extends View {
-    public static final int OFF = 0, CRUISE = 1, MOTORWAY = 2;
+    /** OFF; SPEED follows the GPS speed (stills when parked); ALWAYS runs at a steady cruise. Saved values 1/2 kept. */
+    public static final int OFF = 0, SPEED = 1, ALWAYS = 2;
     private static final float OX = 440f, OY = 40f, DW = 400f;
 
     private float k = 1f;
-    private int mode = CRUISE;
+    private int mode = SPEED;
     private boolean running;
+    private SpeedView speedSrc;
+    private float rate, phase;
+    private long lastDraw;
     private final long t0 = SystemClock.uptimeMillis();
     private int glowCol = 0xFF46AAFF, coreCol = 0xFFCDF0FF;
 
@@ -48,9 +52,9 @@ public class RoadView extends View {
 
     public void setMode(int m) { mode = m; if (m == OFF) { stop(); invalidate(); } else start(); }
 
-    public void start() { if (mode != OFF && !running) { running = true; invalidate(); } }
+    public void start() { if (mode != OFF && !running) { running = true; lastDraw = 0; invalidate(); } }
 
-    public void stop() { running = false; }
+    public void stop() { running = false; lastDraw = 0; }
 
     public boolean isActive() { return running && mode != OFF; }
 
@@ -68,9 +72,9 @@ public class RoadView extends View {
     private static float laneX(float y, int side) { return side < 0 ? 545f - (y - 60f) * 0.165f : 737f + (y - 60f) * 0.165f; }
 
     /** One light streak; ph runs 0..1 from the far end of the lane to the near end. */
-    private void pulse(Canvas c, int side, float ph) {
+    private void pulse(Canvas c, int side, float ph, float vis) {
         float e = (float) Math.pow(ph, 1.5), y = 60f + e * 430f, len = 26f + e * 80f, y0 = y - len;
-        float a = ph < 0.12f ? ph / 0.12f : ph > 0.85f ? (1f - ph) / 0.15f : 1f;
+        float a = (ph < 0.12f ? ph / 0.12f : ph > 0.85f ? (1f - ph) / 0.15f : 1f) * vis;
         if (a <= 0) return;
         float x1 = (laneX(y0, side) - OX) * k, x2 = (laneX(y, side) - OX) * k;
         float Y0 = (y0 - OY) * k, Y1 = (y - OY) * k;
@@ -101,14 +105,28 @@ public class RoadView extends View {
         c.restore();
     }
 
+    /** The speedometer: in SPEED mode the lane lights run at the car's real speed. */
+    public void setSpeedSource(SpeedView s) { speedSrc = s; }
+
+    /** Lane-light cycles per second for a speed: 60 km/h = one every 1.5 s, 120 km/h = one every 0.75 s. */
+    private static float rateFor(float kmh) { return Math.min(2f, Math.max(0f, kmh) / 90f); }
+
     @Override protected void onDraw(Canvas c) {
         if (mode == OFF || !running) return;
-        float t = (SystemClock.uptimeMillis() - t0) / 1000f;
-        float per = mode == MOTORWAY ? 0.75f : 1.5f;
-        for (int i = 0; i < 2; i++) {
-            float ph = ((t / per) + i * 0.5f) % 1f;
-            pulse(c, -1, ph);
-            pulse(c, 1, (ph + 0.25f) % 1f);
+        long now = SystemClock.uptimeMillis();
+        float t = (now - t0) / 1000f;
+        float target;
+        if (mode == ALWAYS) target = rateFor(60f);
+        else target = speedSrc == null ? 0f : rateFor(speedSrc.kmh()); // parked or no GPS: lights rest
+        float dt = lastDraw == 0 ? 0f : Math.min(0.1f, (now - lastDraw) / 1000f);
+        lastDraw = now;
+        rate += (target - rate) * Math.min(1f, dt * 1.5f); // ease into speed changes, no jumps
+        phase = (phase + rate * dt) % 1f;
+        float vis = Math.min(1f, rate / 0.12f);            // streaks fade out as the car stops
+        if (vis > 0.01f) for (int i = 0; i < 2; i++) {
+            float ph = (phase + i * 0.5f) % 1f;
+            pulse(c, -1, ph, vis);
+            pulse(c, 1, (ph + 0.25f) % 1f, vis);
         }
         float lvl = 0.35f + 0.35f * (0.5f + 0.5f * (float) Math.sin(t * 2 * Math.PI / 2.6));
         tail(c, 588f, 452f, lvl);
