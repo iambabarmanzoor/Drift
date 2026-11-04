@@ -1,7 +1,7 @@
-{
-  "versionCode": 17,
-  "versionName": "1.0.1",
-  "apk": "https://github.com/iambabarmanzoor/Drift/releases/download/v1.0.1/Drift.apk",
-  "sha256": "e533e6ab628504264fea955e08dbd1f45bd88f940270bc53556b1007eb7c61a4",
-  "notes": "Fix: the play button now wakes up music apps that are asleep after the car starts, so your song resumes from Drift."
-}
+   {
+     "versionCode": 18,
+     "versionName": "1.1.0",
+     "apk": "https://github.com/iambabarmanzoor/Drift/releases/download/v1.1.0/Drift.apk",
+     "sha256": "dc609333fa5f0ae9b4944a29bf79f9c00c5e582c2f4fad8c6d14c3a9b027f693",
+     "notes": "Drift Music: a built-in player with search, playlists you can name and edit (Spotify-style), and a spinning record for songs without a cover. The road animation now follows your speed. New app icon, smoother player glow, readable messages, and tapping the car no longer opens the wrong app."
+   }
