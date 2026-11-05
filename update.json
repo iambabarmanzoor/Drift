@@ -1,7 +1,7 @@
-   {
-     "versionCode": 18,
-     "versionName": "1.1.0",
-     "apk": "https://github.com/iambabarmanzoor/Drift/releases/download/v1.1.0/Drift.apk",
-     "sha256": "dc609333fa5f0ae9b4944a29bf79f9c00c5e582c2f4fad8c6d14c3a9b027f693",
-     "notes": "Drift Music: a built-in player with search, playlists you can name and edit (Spotify-style), and a spinning record for songs without a cover. The road animation now follows your speed. New app icon, smoother player glow, readable messages, and tapping the car no longer opens the wrong app."
-   }
+{
+  "versionCode": 21,
+  "versionName": "1.1.1",
+  "apk": "https://github.com/iambabarmanzoor/Drift/releases/download/v1.1.1/Drift.apk",
+  "sha256": "fede135b09d9c48f0986a224eb173cb690394227c87bd9e587045f1519944888",
+  "notes": "Drift Music detects Bluetooth and other apps playing, and the card opens the app that's playing. Recent apps works on units whose own recents screen doesn't open, with Close and Close all. Swipe down from the top for notifications on any unit. The volume slider follows the knob. USB stick removal handled cleanly. Updates now install the modern way, and testers can switch on beta updates by holding About."
+}
