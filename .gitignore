@@ -1,0 +1,6 @@
+# Never commit the signing key or build output
+*.keystore
+*.jks
+build/
+*.apk
+.DS_Store

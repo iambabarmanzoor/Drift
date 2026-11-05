@@ -36,6 +36,8 @@ import java.util.concurrent.Executors;
 public final class Updater {
     /** Where update.json lives. Set to your GitHub repo (raw file URL). */
     public static final String UPDATE_URL = "https://raw.githubusercontent.com/iambabarmanzoor/Drift/main/update.json";
+    /** Beta channel: test builds, read only by units with Beta updates switched on (hold About in Settings). */
+    public static final String BETA_URL = "https://raw.githubusercontent.com/iambabarmanzoor/Drift/main/beta.json";
     private static final long AUTO_EVERY_MS = 6 * 60 * 60 * 1000L; // check at most every 6 hours on its own
 
     public interface Listener { void onUpdateState(); }
@@ -61,6 +63,13 @@ public final class Updater {
     public static String installedName(Context c) {
         try { return c.getPackageManager().getPackageInfo(c.getPackageName(), 0).versionName; } catch (Exception e) { return "?"; }
     }
+
+    public static boolean beta(Context c) { return prefs(c).getBoolean("beta", false); }
+
+    /** Switch the beta channel on/off; the next check picks whichever build is newer. */
+    public static void setBeta(Context c, boolean on) { prefs(c).edit().putBoolean("beta", on).putLong("checkedAt", 0).apply(); }
+
+    public static String latestName(Context c) { return prefs(c).getString("name", ""); }
 
     public static boolean configured() { return !UPDATE_URL.contains("/OWNER/"); }
 
@@ -95,6 +104,12 @@ public final class Updater {
             @Override public void run() {
                 try {
                     JSONObject j = new JSONObject(new String(get(UPDATE_URL + "?t=" + System.currentTimeMillis()), "UTF-8"));
+                    if (beta(c)) { // beta units take whichever build is newer: a test build, or a stable one that replaced it
+                        try {
+                            JSONObject b = new JSONObject(new String(get(BETA_URL + "?t=" + System.currentTimeMillis()), "UTF-8"));
+                            if (b.getInt("versionCode") > j.getInt("versionCode")) j = b;
+                        } catch (Throwable ignored) { /* no beta out right now: stable only */ }
+                    }
                     prefs(c).edit()
                             .putInt("code", j.getInt("versionCode"))
                             .putString("name", j.optString("versionName", ""))
@@ -151,7 +166,68 @@ public final class Updater {
         });
     }
 
-    private static void install(Context c) {
+    static final String ACTION_STATUS = "com.drift.launcher.INSTALL_STATUS";
+
+    /**
+     * Install the downloaded update. Uses Android's session installer (the way app stores do it), so
+     * Android 13+ doesn't put the "restricted setting" lock on notification access afterwards. If a unit
+     * can't do that, falls back to the classic installer screen. Either way Android asks to confirm.
+     */
+    private static void install(final Context c) {
+        if (android.os.Build.VERSION.SDK_INT >= 21) {
+            try { sessionInstall(c.getApplicationContext()); return; } catch (Throwable t) { /* fall back below */ }
+        }
+        classicInstall(c);
+    }
+
+    private static android.content.BroadcastReceiver statusRx;
+
+    private static void sessionInstall(final Context c) throws Exception {
+        android.content.pm.PackageInstaller pi = c.getPackageManager().getPackageInstaller();
+        android.content.pm.PackageInstaller.SessionParams sp =
+                new android.content.pm.PackageInstaller.SessionParams(android.content.pm.PackageInstaller.SessionParams.MODE_FULL_INSTALL);
+        sp.setAppPackageName(c.getPackageName());
+        File apk = ApkProvider.file(c);
+        sp.setSize(apk.length());
+        int id = pi.createSession(sp);
+        android.content.pm.PackageInstaller.Session s = pi.openSession(id);
+        try {
+            java.io.OutputStream out = s.openWrite("Drift.apk", 0, apk.length());
+            java.io.FileInputStream in = new java.io.FileInputStream(apk);
+            byte[] buf = new byte[65536]; int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            in.close();
+            s.fsync(out);
+            out.close();
+            if (statusRx == null) {
+                statusRx = new android.content.BroadcastReceiver() {
+                    @Override public void onReceive(Context x, Intent r) {
+                        int st = r.getIntExtra(android.content.pm.PackageInstaller.EXTRA_STATUS, -999);
+                        if (st == android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION) {
+                            Intent confirm = r.getParcelableExtra(Intent.EXTRA_INTENT);
+                            if (confirm != null) { confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); try { x.startActivity(confirm); return; } catch (Throwable ignored) { } }
+                            classicInstall(x);
+                        } else if (st == android.content.pm.PackageInstaller.STATUS_FAILURE_ABORTED) {
+                            // the user tapped Cancel: nothing to do, they can try again from About
+                        } else if (st != android.content.pm.PackageInstaller.STATUS_SUCCESS) {
+                            classicInstall(x); // anything else: the classic installer screen
+                        }
+                    }
+                };
+                c.registerReceiver(statusRx, new android.content.IntentFilter(ACTION_STATUS));
+            }
+            Intent cb = new Intent(ACTION_STATUS).setPackage(c.getPackageName());
+            android.app.PendingIntent pend = android.app.PendingIntent.getBroadcast(c, id, cb, android.app.PendingIntent.FLAG_UPDATE_CURRENT);
+            s.commit(pend.getIntentSender());
+        } catch (Exception e) {
+            s.abandon();
+            throw e;
+        } finally {
+            s.close();
+        }
+    }
+
+    private static void classicInstall(Context c) {
         Intent i = new Intent(Intent.ACTION_VIEW)
                 .setDataAndType(ApkProvider.uri(), "application/vnd.android.package-archive")
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);

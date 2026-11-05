@@ -329,6 +329,44 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
                 | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
     }
 
+    // ---- swipe down from the top edge: open Android's notification shade.
+    // Some units' own system bar can't be pulled down while an app is full screen, so Drift opens it itself.
+    private float shadeY0 = -1, shadeX0;
+    private boolean shadeDone;
+
+    @Override public boolean dispatchTouchEvent(android.view.MotionEvent e) {
+        float h = getWindow().getDecorView().getHeight();
+        switch (e.getActionMasked()) {
+            case android.view.MotionEvent.ACTION_DOWN:
+                shadeDone = false;
+                shadeY0 = h > 0 && e.getRawY() < h * 0.05f ? e.getRawY() : -1;
+                shadeX0 = e.getRawX();
+                break;
+            case android.view.MotionEvent.ACTION_MOVE:
+                if (shadeY0 >= 0 && !shadeDone) {
+                    float dy = e.getRawY() - shadeY0, dx = Math.abs(e.getRawX() - shadeX0);
+                    if (dy > h * 0.07f && dy > dx) { shadeDone = true; openShade(); }
+                }
+                break;
+        }
+        return super.dispatchTouchEvent(e);
+    }
+
+    private void openShade() {
+        try {
+            Object sb = getSystemService("statusbar");
+            Class.forName("android.app.StatusBarManager").getMethod("expandNotificationsPanel").invoke(sb);
+            return;
+        } catch (Throwable ignored) { }
+        // couldn't open it directly: show Android's bars for a few seconds so it can be pulled down
+        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
+        home.removeCallbacks(rehide);
+        home.postDelayed(rehide, 6000);
+    }
+
+    private final Runnable rehide = new Runnable() { @Override public void run() { if (hasWindowFocus()) immersive(); } };
+
     @Override public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) immersive();
@@ -363,7 +401,12 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
 
     /** A USB stick was plugged in or removed: refresh Drift Music's library. */
     private final BroadcastReceiver mountRx = new BroadcastReceiver() {
-        @Override public void onReceive(Context c, Intent i) { music.refreshLibrary(); }
+        @Override public void onReceive(Context c, Intent i) {
+            music.refreshLibrary();
+            MusicService s = MusicService.get();
+            if (s != null) s.storageChanged();
+            media.refreshNow();
+        }
     };
 
     @Override protected void onNewIntent(Intent i) {
@@ -513,9 +556,18 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
         try {
             Bundle opts = from == null ? null : ActivityOptions.makeScaleUpAnimation(from, 0, 0, from.getWidth(), from.getHeight()).toBundle();
             startActivity(i, opts);
+            if (isMusicApp(a)) media.externalOpened(a.cn.getPackageName());
         } catch (Exception e) {
             toast("Can't open " + a.label, false);
         }
+    }
+
+    /** A music player or the unit's Bluetooth music app (by name, like the shortcut icons). */
+    private static boolean isMusicApp(AppRepo.App a) {
+        String s = (a.cn.getPackageName() + " " + a.label).toLowerCase(Locale.ROOT);
+        if ("MUSIC".equals(TileView.guessCategory(a))) return true;
+        boolean bt = s.contains("bluetooth") || s.contains("bt") || s.contains("a2dp");
+        return bt && (s.contains("music") || s.contains("audio") || s.contains("media") || s.contains("a2dp"));
     }
 
     /** Tap on the car: open the first navigation app we can find (shortcut 1 first). */
@@ -607,6 +659,7 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
     private boolean driftMusic() { return getPackageName().equals(preferredPackage()); }
 
     private void openMusic() {
+        media.externalOpened(null);
         if (!TrackInfo.allowed(this)) allowStorage();
         music.show();
     }
@@ -715,6 +768,8 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
 
     @Override public void onCardTap() {
         String pkg = media.playingPackage();
+        // another source is playing and Drift can't tell which app: open All Apps, never Drift Music
+        if (pkg == null && media.showingOther()) { drawer.show(-1); return; }
         if (getPackageName().equals(pkg) || (pkg == null && driftMusic())) { openMusic(); return; }
         if (!MediaHub.hasAccess(this) || !MediaWatcher.connected) { askAccess(); return; }
         if (pkg != null) {
@@ -858,14 +913,29 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
             case Updater.DOWNLOADING: return "Downloading update\u2026 " + Updater.progress() + "%";
             case Updater.FAILED: return Updater.error() + ". Tap to try again";
             default:
-                if (Updater.available(this)) return "Update ready (build " + Updater.latestCode(this) + "). Tap to install";
+                if (Updater.available(this)) return "Update ready (" + Updater.latestName(this) + "). Tap to install";
                 long at = Updater.checkedAt(this);
                 if (at == 0) return "By Babar Manzoor. Tap to check for updates";
                 long min = Math.max(0, (System.currentTimeMillis() - at) / 60000);
                 String ago = min < 1 ? "just now" : min < 60 ? min + " min ago" : min < 1440 ? (min / 60) + " h ago" : (min / 1440) + " d ago";
-                return "Up to date, checked " + ago + ". Tap to check";
+                return (Updater.beta(this) ? "Beta updates on. " : "") + "Up to date, checked " + ago + ". Tap to check";
         }
     }
+    /** Hold About: beta updates on/off (for testing new builds without a USB stick). */
+    @Override public void toggleBeta() {
+        if (!Updater.configured()) return;
+        final boolean on = !Updater.beta(this);
+        sheet.message(on ? "Turn on beta updates?" : "Turn off beta updates?",
+                on ? "This unit will also get test builds of Drift before they're released. They're signed and checked the same way, but may have rough edges. Hold About again to turn it off."
+                   : "This unit goes back to stable releases only. A test build already installed stays until the next stable release replaces it.",
+                on ? "Turn on" : "Turn off", new Runnable() { @Override public void run() {
+                    Updater.setBeta(Launcher.this, on);
+                    toast(on ? "Beta updates on" : "Beta updates off", false);
+                    Updater.check(Launcher.this, updates);
+                    settings.refresh();
+                } }, "Cancel");
+    }
+
     @Override public void updateTap() {
         if (!Updater.configured()) return;
         if (Updater.available(this)) {

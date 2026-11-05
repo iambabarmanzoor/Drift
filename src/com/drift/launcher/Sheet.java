@@ -79,7 +79,12 @@ public class Sheet extends FrameLayout {
             TextView st = text(subtitle, 16, Palette.SUB, "sans-serif", false);
             st.setPadding(pad, 0, pad, Math.round(16 * s));
             st.setLineSpacing(0, 1.2f);
-            card.addView(st);
+            if (subtitle.length() > 320) { // long text (e.g. music diagnostics): scroll inside the card
+                android.widget.ScrollView sv = new android.widget.ScrollView(getContext());
+                sv.setScrollbarFadingEnabled(false);
+                sv.addView(st);
+                card.addView(sv, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, Math.round(470 * s)));
+            } else card.addView(st);
         }
     }
 

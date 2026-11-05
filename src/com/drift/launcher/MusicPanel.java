@@ -144,9 +144,9 @@ public class MusicPanel extends HomeLayout implements MusicService.Listener, Mus
     public void setAccent(Accent a) { acc = a.glow(); left.rebuild(); invalidate(); left.invalidate(); right.invalidate(); }
 
     /** The launcher went to the background: stop animating. */
-    public void paused() { left.removeCallbacks(left.frame); right.removeCallbacks(right.eqTick); removeCallbacks(driveCheck); }
+    public void paused() { left.removeCallbacks(left.frame); right.removeCallbacks(right.eqTick); removeCallbacks(driveCheck); watchVolume(false); }
 
-    public void resumed() { if (open) { left.tick(); right.invalidate(); removeCallbacks(driveCheck); post(driveCheck); } }
+    public void resumed() { if (open) { left.tick(); right.invalidate(); removeCallbacks(driveCheck); post(driveCheck); watchVolume(true); } }
 
     // ---- search (parked only)
     private boolean wasDriving;
@@ -160,6 +160,53 @@ public class MusicPanel extends HomeLayout implements MusicService.Listener, Mus
     };
 
     boolean driving() { return host.speedKmh() > DRIVING_KMH; }
+
+    // ---- volume: keep the slider in step with the unit's knob / steering buttons
+    private String lastSysKey, lastSysVal;
+    private final android.content.BroadcastReceiver volRx = new android.content.BroadcastReceiver() {
+        @Override public void onReceive(Context c, android.content.Intent i) { right.invalidate(); }
+    };
+    /** Many head units keep their real volume in a system setting; note which one moves so we can show it. */
+    private final android.database.ContentObserver sysObs = new android.database.ContentObserver(new Handler(Looper.getMainLooper())) {
+        @Override public void onChange(boolean self, android.net.Uri uri) {
+            if (uri != null) {
+                String key = uri.getLastPathSegment();
+                if (key != null && key.toLowerCase(Locale.ROOT).contains("vol")) {
+                    lastSysKey = key;
+                    try { lastSysVal = android.provider.Settings.System.getString(getContext().getContentResolver(), key); } catch (Throwable t) { lastSysVal = "?"; }
+                }
+            }
+            right.invalidate();
+        }
+    };
+    private boolean volWatching;
+
+    private void watchVolume(boolean on) {
+        if (on == volWatching) return;
+        volWatching = on;
+        try {
+            if (on) {
+                getContext().registerReceiver(volRx, new android.content.IntentFilter("android.media.VOLUME_CHANGED_ACTION"));
+                getContext().getContentResolver().registerContentObserver(android.provider.Settings.System.CONTENT_URI, true, sysObs);
+            } else {
+                getContext().unregisterReceiver(volRx);
+                getContext().getContentResolver().unregisterContentObserver(sysObs);
+            }
+        } catch (Throwable ignored) { }
+    }
+
+    /** Tap the speaker icon: what Drift can see of the unit's volume (for diagnosing units that do their own thing). */
+    void volumeInfo() {
+        AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+        int v = -1, max = -1; boolean fixed = false;
+        try { v = am.getStreamVolume(AudioManager.STREAM_MUSIC); max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC); fixed = am.isVolumeFixed(); } catch (Throwable ignored) { }
+        String sys = lastSysKey == null ? "Unit volume setting: none seen yet. Turn the knob, then tap the speaker again"
+                : "Unit volume setting: " + lastSysKey + " = " + lastSysVal;
+        host.musicSheet("Volume info", new String[] {
+                "Android music volume: " + v + " of " + max,
+                "Fixed by the unit: " + (fixed ? "yes" : "no"),
+                sys }, new Sheet.OnPick() { @Override public void onPick(int i) { } });
+    }
 
     void showKeyboard() {
         query.setVisibility(VISIBLE);
@@ -190,6 +237,7 @@ public class MusicPanel extends HomeLayout implements MusicService.Listener, Mus
         right.refreshRoot();
         left.tick();
         removeCallbacks(driveCheck); post(driveCheck);
+        watchVolume(true);
     }
 
     public void close() {
@@ -197,6 +245,7 @@ public class MusicPanel extends HomeLayout implements MusicService.Listener, Mus
         open = false;
         if (right.finding) right.closeFind();
         removeCallbacks(driveCheck);
+        watchVolume(false);
         MusicService.removeListener(this);
         animate().alpha(0f).setDuration(150).withLayer().withEndAction(new Runnable() {
             @Override public void run() { if (!open) setVisibility(GONE); }
@@ -1640,7 +1689,7 @@ public class MusicPanel extends HomeLayout implements MusicService.Listener, Mus
 
         // ---------------------------------------------------------------- touch
 
-        private static final int Z_NONE = 0, Z_TAB = 1, Z_BACK = 2, Z_PLAY = 3, Z_SHUF = 4, Z_LIST = 5, Z_AZ = 6, Z_VOL = 7, Z_FIND = 8, Z_DONE = 9, Z_CLEAR = 10, Z_PLMORE = 11, Z_ADDDONE = 12;
+        private static final int Z_NONE = 0, Z_TAB = 1, Z_BACK = 2, Z_PLAY = 3, Z_SHUF = 4, Z_LIST = 5, Z_AZ = 6, Z_VOL = 7, Z_FIND = 8, Z_DONE = 9, Z_CLEAR = 10, Z_PLMORE = 11, Z_ADDDONE = 12, Z_VOLINFO = 13;
 
         private int zone(float x, float y) {
             float X = x / k, Y = y / k;
@@ -1662,6 +1711,7 @@ public class MusicPanel extends HomeLayout implements MusicService.Listener, Mus
             if (showAZ() && X >= 617 && Y >= 160 && Y <= 606) return Z_AZ;
             if (Y >= LIST_T && Y <= LIST_T + LIST_H) return Z_LIST;
             if (Y >= 624 && Y <= 670 && X >= 440) return Z_VOL;
+            if (Y >= 620 && Y <= 674 && X >= 392 && X < 440) return Z_VOLINFO;
             return Z_NONE;
         }
 
@@ -1691,10 +1741,16 @@ public class MusicPanel extends HomeLayout implements MusicService.Listener, Mus
             invalidate();
         }
 
+        private boolean volWarned;
+
         private void setVol(float x) {
             float volR = 616 * k, volL = volR - 163 * k;
             float f = Math.max(0, Math.min(1, (x - volL) / (volR - volL)));
-            try { int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC); audio.setStreamVolume(AudioManager.STREAM_MUSIC, Math.round(f * max), 0); } catch (Throwable ignored) { }
+            try {
+                if (audio.isVolumeFixed()) { if (!volWarned) { volWarned = true; host.musicToast("This unit sets the volume itself. Use the knob or steering buttons"); } return; }
+                int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+                audio.setStreamVolume(AudioManager.STREAM_MUSIC, Math.round(f * max), 0);
+            } catch (Throwable ignored) { }
             invalidate();
         }
 
@@ -1759,6 +1815,7 @@ public class MusicPanel extends HomeLayout implements MusicService.Listener, Mus
                 case Z_FIND: openFind(); return;
                 case Z_PLMORE: if (openList != null && openList.playlist != null) playlistMenu(openList.playlist); return;
                 case Z_ADDDONE: closeFind(); return;
+                case Z_VOLINFO: volumeInfo(); return;
                 case Z_DONE: remember(); closeFind(); return;
                 case Z_CLEAR: query.setText(""); showKeyboard(); return;
                 case Z_NONE: {

@@ -117,6 +117,31 @@ public class MusicService extends Service implements MediaPlayer.OnPreparedListe
 
     public MediaSession.Token token() { return session.getSessionToken(); }
     public boolean hasSong() { return index >= 0 && index < queue.size(); }
+
+    /** Has a song and its file is still there (a USB stick may have been pulled out). */
+    public boolean songAvailable() {
+        MusicLibrary.Song s = current();
+        return s != null && new java.io.File(s.path).exists();
+    }
+
+    /** Storage changed (USB stick in or out): stop cleanly if the current song's file is gone. */
+    public void storageChanged() {
+        if (hasSong() && !songAvailable()) {
+            wantPlay = false;
+            if (mp != null) { try { mp.release(); } catch (Throwable ignored) { } mp = null; prepared = false; }
+            session.setActive(false);
+            updateState();
+            goForeground(false);
+            notifyState();
+        }
+    }
+
+    /**
+     * Another source is playing (Bluetooth, radio, another app) and Drift Music is paused: let go of the
+     * media keys so the steering-wheel and card buttons reach that source instead of waking Drift Music.
+     * Pressing play in Drift Music takes them back.
+     */
+    public void yieldMediaKeys() { if (!isPlaying() && session.isActive()) session.setActive(false); }
     public MusicLibrary.Song current() { return hasSong() ? queue.get(index) : null; }
     public List<MusicLibrary.Song> queue() { return queue; }
     public int index() { return index; }

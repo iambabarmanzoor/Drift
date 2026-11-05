@@ -40,6 +40,7 @@ public class SettingsPanel extends HomeLayout {
         String musicApp();         void chooseMusicApp();
         boolean musicAccess();     void openMusicAccess();
         void openDiagnostics();
+        void toggleBeta();
         void openBluetooth();
         boolean recentsOn();       void openRecentsAccess();
         void resetShortcuts();
@@ -310,6 +311,7 @@ public class SettingsPanel extends HomeLayout {
 
         private void onHold() {
             if (kind == MUSIC) host.openDiagnostics();
+            if (kind == ABOUT) host.toggleBeta();
 
         }
 
@@ -317,7 +319,7 @@ public class SettingsPanel extends HomeLayout {
             switch (e.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
                     pressed = true; held = false; invalidate();
-                    if (kind == MUSIC) postDelayed(hold, 550);
+                    if (kind == MUSIC || kind == ABOUT) postDelayed(hold, 550);
                     return true;
                 case MotionEvent.ACTION_MOVE:
                     if (e.getX() < 0 || e.getY() < 0 || e.getX() > getWidth() || e.getY() > getHeight()) {

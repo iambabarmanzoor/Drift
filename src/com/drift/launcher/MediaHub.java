@@ -15,6 +15,7 @@ import android.graphics.Bitmap;
 import android.media.AudioManager;
 import android.media.MediaMetadata;
 import android.media.session.MediaController;
+import android.media.browse.MediaBrowser;
 import android.media.session.MediaSessionManager;
 import android.media.session.PlaybackState;
 import android.os.Bundle;
@@ -104,7 +105,12 @@ public class MediaHub {
         @Override public void onReceive(Context c, Intent i) {
             String act = i.getAction() == null ? "" : i.getAction();
             lastBroadcast = act + " at " + new SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(new Date());
-            if (controller != null) return; // a real session is better
+            boolean bt = act.startsWith("android.bluetooth.avrcp");
+            if (controller != null) { // a real session is better, unless it's idle and the phone is playing over Bluetooth
+                android.media.session.PlaybackState cs = controller.getPlaybackState();
+                boolean ctlPlaying = cs != null && cs.getState() == android.media.session.PlaybackState.STATE_PLAYING;
+                if (!bt || ctlPlaying) return;
+            }
             if (isInitialStickyBroadcast()) return; // an old track replayed on register, not what's playing now
             String track = null, artist = null, album = null, src = "";
             String pkgGuess = act.startsWith("com.maxmpz.audioplayer") ? "com.maxmpz.audioplayer"
@@ -114,7 +120,22 @@ public class MediaHub {
                 if (ctx.getPackageManager().getLaunchIntentForPackage(guess) != null) pkgGuess = guess;
             }
             Boolean playing = null;
-            if (act.startsWith("com.maxmpz.audioplayer")) {           // Poweramp
+            if (act.startsWith("android.bluetooth.avrcp")) {           // phone over Bluetooth
+                src = "Bluetooth";
+                pkgGuess = null;
+                try {
+                    Object md = i.getParcelableExtra("android.bluetooth.avrcp-controller.profile.extra.METADATA");
+                    if (md instanceof android.media.MediaMetadata) {
+                        android.media.MediaMetadata m = (android.media.MediaMetadata) md;
+                        track = m.getString(android.media.MediaMetadata.METADATA_KEY_TITLE);
+                        artist = m.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST);
+                        album = m.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM);
+                    }
+                    Object pb = i.getParcelableExtra("android.bluetooth.avrcp-controller.profile.extra.PLAYBACK");
+                    if (pb instanceof android.media.session.PlaybackState)
+                        playing = ((android.media.session.PlaybackState) pb).getState() == android.media.session.PlaybackState.STATE_PLAYING;
+                } catch (Throwable ignored) { }
+            } else if (act.startsWith("com.maxmpz.audioplayer")) {           // Poweramp
                 src = "Poweramp";
                 Bundle t = i.getBundleExtra("track");
                 if (t != null) { track = t.getString("title"); artist = t.getString("artist"); album = t.getString("album"); }
@@ -140,6 +161,97 @@ public class MediaHub {
             }
         }
     };
+
+    /**
+     * The music app last opened from Drift (e.g. the unit's Bluetooth music). Some units play Bluetooth
+     * audio outside Android, so the app shares nothing; the card then shows that app instead of an
+     * old paused song, and a tap opens it. Cleared when something else actually plays.
+     */
+    private String externalPkg;
+
+    public void externalOpened(String pkg) { externalPkg = pkg; if (started) refresh(); }
+
+    // ---- another source is playing that nobody reports (e.g. Bluetooth on units whose BT app shares nothing)
+    private long otherSince;        // when audio started playing with no player reporting it (0 = not)
+    private boolean showingOther;   // the card is showing "Playing in ..." for that source
+    private static final long OTHER_AFTER_MS = 3000; // ignore short sounds like navigation prompts
+
+    public boolean showingOther() { return showingOther; }
+
+    /** Audio is playing, but not Drift Music and not any player that tells us about it. */
+    private boolean otherAudio() {
+        if (!audio.isMusicActive()) return false;
+        MusicService o = MusicService.get();
+        if (o != null && o.isPlaying()) return false;
+        MediaController c = controller;
+        if (c != null && !ctx.getPackageName().equals(c.getPackageName())) {
+            PlaybackState s = c.getPlaybackState();
+            if (s != null && s.getState() == PlaybackState.STATE_PLAYING) return false;
+        }
+        return true;
+    }
+
+    /** The unit's Bluetooth music app, found by name like Drift's shortcut icons (null if none). */
+    private String btMusicPkg;
+    private boolean btSearched;
+    private String findBtMusicApp() {
+        if (btSearched) return btMusicPkg;
+        btSearched = true;
+        try {
+            Intent li = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+            for (android.content.pm.ResolveInfo ri : ctx.getPackageManager().queryIntentActivities(li, 0)) {
+                String pkg = ri.activityInfo.packageName;
+                if (pkg.equals(ctx.getPackageName())) continue;
+                String s = (pkg + " " + ri.loadLabel(ctx.getPackageManager())).toLowerCase(Locale.ROOT);
+                boolean bt = s.contains("bluetooth") || s.contains("bt") || s.contains("a2dp") || s.contains("蓝牙");
+                if (bt && (s.contains("music") || s.contains("audio") || s.contains("a2dp") || s.contains("音乐"))) { btMusicPkg = pkg; break; }
+            }
+        } catch (Throwable ignored) { }
+        return btMusicPkg;
+    }
+
+    // ---- Android's own Bluetooth music service (the phone's song over Bluetooth, on units using Android's stack)
+    private MediaBrowser btBrowser;
+    private MediaController btCtl;
+    private String btStatus = "not looked for yet";
+    private final MediaController.Callback btCb = new MediaController.Callback() {
+        @Override public void onPlaybackStateChanged(PlaybackState s) { if (started) refresh(); }
+        @Override public void onMetadataChanged(MediaMetadata m) { if (started) refresh(); }
+    };
+
+    private void connectBluetoothMusic() {
+        if (btBrowser != null) return;
+        ComponentName found = null;
+        StringBuilder seen = new StringBuilder();
+        try {
+            for (android.content.pm.ResolveInfo ri : ctx.getPackageManager().queryIntentServices(new Intent("android.media.browse.MediaBrowserService"), 0)) {
+                String pkg = ri.serviceInfo.packageName;
+                if (seen.length() > 0) seen.append(", ");
+                seen.append(pkg).append('/').append(ri.serviceInfo.name.replace(pkg, ""));
+                if (found == null && pkg.toLowerCase(Locale.ROOT).contains("bluetooth")) found = new ComponentName(pkg, ri.serviceInfo.name);
+            }
+        } catch (Throwable ignored) { }
+        if (found == null) { btStatus = "none on this unit" + (seen.length() > 0 ? " (music services: " + seen + ")" : ""); return; }
+        final ComponentName cn = found;
+        btStatus = cn.flattenToShortString() + ": connecting";
+        try {
+            btBrowser = new MediaBrowser(ctx, cn, new MediaBrowser.ConnectionCallback() {
+                @Override public void onConnected() {
+                    try {
+                        btCtl = new MediaController(ctx, btBrowser.getSessionToken());
+                        btCtl.registerCallback(btCb, main);
+                        btStatus = cn.flattenToShortString() + ": connected";
+                    } catch (Throwable t) { btStatus = cn.flattenToShortString() + ": no session"; }
+                    if (started) refresh();
+                }
+                @Override public void onConnectionFailed() { btStatus = cn.flattenToShortString() + ": refused"; btBrowser = null; }
+                @Override public void onConnectionSuspended() { btStatus = cn.flattenToShortString() + ": disconnected"; if (btCtl != null) btCtl.unregisterCallback(btCb); btCtl = null; btBrowser = null; }
+            }, null);
+            btBrowser.connect();
+        } catch (Throwable t) { btStatus = cn.flattenToShortString() + ": failed (" + t.getClass().getSimpleName() + ")"; btBrowser = null; }
+    }
+
+    static final String AVRCP_TRACK = "android.bluetooth.avrcp-controller.profile.action.TRACK_EVENT";
 
     public MediaHub(Context c, MediaCard card, Player player) {
         ctx = c;
@@ -171,9 +283,12 @@ public class MediaHub {
             "com.samsung.sec.android.MusicPlayer.metachanged", "fm.last.android.metachanged",
             "com.rdio.android.metachanged", "com.andrew.apollo.metachanged", "com.amazon.mp3.metachanged",
             "com.real.IMP.metachanged", "com.lge.music.metachanged", "com.nullsoft.winamp.metachanged",
+            // Bluetooth music from the phone (Android's AVRCP controller, used by many head units' BT apps)
+            AVRCP_TRACK, "android.bluetooth.avrcp-controller.profile.action.PLAYBACK_STATE_CHANGED",
         };
         for (String a : acts) f.addAction(a);
         try { ctx.registerReceiver(legacy, f); } catch (Exception ignored) { }
+        connectBluetoothMusic();
 
         boolean access = hasAccess(ctx);
         card.setNeedsAccess(!access);
@@ -217,11 +332,17 @@ public class MediaHub {
     private final Runnable poll = new Runnable() {
         @Override public void run() {
             if (!started) return;
-            if (controller == null && !legacyShown && SystemClock.elapsedRealtime() >= holdUntil) {
-                boolean active = audio.isMusicActive();
-                if (active != cardPlaying) refresh();
+            long now = SystemClock.elapsedRealtime();
+            if (now >= holdUntil) {
+                if (otherAudio()) { if (otherSince == 0) otherSince = now; } else otherSince = 0;
+                boolean want = otherSince != 0 && now - otherSince >= OTHER_AFTER_MS;
+                if (want != showingOther) refresh();
+                else if (controller == null && !legacyShown) {
+                    boolean active = audio.isMusicActive();
+                    if (active != cardPlaying) refresh();
+                }
             }
-            main.postDelayed(this, 2000);
+            main.postDelayed(this, 1500);
         }
     };
 
@@ -264,10 +385,15 @@ public class MediaHub {
         }
         // Drift's own player is always visible to the card, with or without notification access
         MusicService own = MusicService.get();
-        if (own != null && own.hasSong() && (own.isPlaying() || ctx.getPackageName().equals(player.preferredPackage()))) {
+        if (own != null && own.songAvailable() && (own.isPlaying() || ctx.getPackageName().equals(player.preferredPackage()))) {
             boolean dup = false;
             for (MediaController m : list) if (m.getSessionToken().equals(own.token())) { dup = true; break; }
             if (!dup) try { list.add(new MediaController(ctx, own.token())); } catch (Exception ignored) { }
+        }
+        if (btCtl != null) {
+            boolean dup = false;
+            for (MediaController m : list) if (m.getSessionToken().equals(btCtl.getSessionToken())) { dup = true; break; }
+            if (!dup) list.add(btCtl);
         }
         List<MediaWatcher.Entry> notes = MediaWatcher.entries();
         for (MediaWatcher.Entry e : notes) {
@@ -288,6 +414,33 @@ public class MediaHub {
         for (MediaController m : list) {
             PlaybackState s = m.getPlaybackState();
             if (s != null && s.getState() == PlaybackState.STATE_PLAYING) { best = m; break; }
+        }
+        if (best != null && externalPkg != null && !externalPkg.equals(best.getPackageName())) externalPkg = null; // something else is playing now
+        MusicService ownSvc = MusicService.get();
+        if (ownSvc != null && ownSvc.isPlaying()) externalPkg = null;
+        if (best == null && externalPkg != null) {
+            for (MediaController m : list) if (externalPkg.equals(m.getPackageName())) { best = m; break; }
+        }
+        showingOther = false;
+        boolean other = otherSince != 0 && SystemClock.elapsedRealtime() - otherSince >= OTHER_AFTER_MS;
+        boolean songNote = false;
+        for (MediaWatcher.Entry e : notes) if (e.title != null || e.text != null) songNote = true;
+        if (best == null && other && !songNote) {
+            // Something is playing that no player reports (e.g. Bluetooth on units whose BT app shares
+            // nothing). Don't show Drift Music's old song: show the likely source, and let go of the
+            // media keys so the buttons reach it.
+            MusicService o = MusicService.get();
+            if (o != null) o.yieldMediaKeys();
+            String pkg = externalPkg != null ? externalPkg : findBtMusicApp();
+            if (controller != null) { controller.unregisterCallback(cb); controller = null; }
+            showingOther = true;
+            legacyShown = true;
+            legacyPkg = pkg;
+            lastPkg = pkg;
+            cardPlaying = true;
+            if (pkg != null) card.update(appLabel(pkg), "Playing in " + appLabel(pkg) + " \u00b7 tap to open", null, appLabel(pkg), null, true, -1, 0, 1f, 0);
+            else card.update("Playing on another source", "Bluetooth, radio or another app", null, "", null, true, -1, 0, 1f, 0);
+            return;
         }
         if (best == null && controller != null) { // keep showing the app the user was just using
             for (MediaController m : list) if (m.getSessionToken().equals(controller.getSessionToken())) { best = m; break; }
@@ -544,9 +697,20 @@ public class MediaHub {
 
     // ------------------------------------------------------------ controls
 
+    /** Card buttons while another, silent source plays: standard media keys, which reach it once Drift Music lets go. */
+    private boolean otherKey(int code) {
+        if (!showingOther) return false;
+        MusicService o = MusicService.get();
+        if (o != null) o.yieldMediaKeys();
+        key(code);
+        if (code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE) { cardPlaying = !cardPlaying; holdUntil = SystemClock.elapsedRealtime() + 2800; card.setPlaying(cardPlaying); }
+        return true;
+    }
+
     public void playPause() {
         main.removeCallbacks(launchIfSilent);
         resumeTry++; // any new press cancels a pending wake-up
+        if (otherKey(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)) return;
         if (controller != null) {
             PlaybackState s = controller.getPlaybackState();
             if (s != null && s.getState() == PlaybackState.STATE_PLAYING) { controller.getTransportControls().pause(); return; }
@@ -592,6 +756,7 @@ public class MediaHub {
     public void next() {
         main.removeCallbacks(launchIfSilent);
         resumeTry++; // any new press cancels a pending wake-up
+        if (otherKey(KeyEvent.KEYCODE_MEDIA_NEXT)) return;
         if (controller != null) { controller.getTransportControls().skipToNext(); return; }
         String target = targetPkg();
         if (target != null && noteAction(target, A_NEXT)) { restartClock(); return; }
@@ -602,6 +767,7 @@ public class MediaHub {
     public void prev() {
         main.removeCallbacks(launchIfSilent);
         resumeTry++; // any new press cancels a pending wake-up
+        if (otherKey(KeyEvent.KEYCODE_MEDIA_PREVIOUS)) return;
         if (controller != null) { controller.getTransportControls().skipToPrevious(); return; }
         String target = targetPkg();
         if (target != null && noteAction(target, A_PREV)) { restartClock(); return; }
@@ -699,6 +865,17 @@ public class MediaHub {
         b.append("Notification access: ").append(hasAccess(ctx) ? "ON" : "OFF").append('\n');
         b.append("Listener connected: ").append(MediaWatcher.connected ? "yes" : "no").append('\n');
         b.append("Audio playing now: ").append(audio.isMusicActive() ? "yes" : "no").append('\n');
+        b.append("Last music broadcast: ").append(lastBroadcast).append('\n');
+        b.append("Bluetooth music service: ").append(btStatus).append('\n');
+        if (btCtl != null) {
+            PlaybackState bs = btCtl.getPlaybackState();
+            MediaMetadata bm = btCtl.getMetadata();
+            String bt = bm == null ? null : bm.getString(MediaMetadata.METADATA_KEY_TITLE);
+            b.append("  state ").append(bs == null ? "?" : String.valueOf(bs.getState())).append("  song: ").append(bt == null ? "none" : bt).append('\n');
+        }
+        String btApp = findBtMusicApp();
+        b.append("Bluetooth music app: ").append(btApp == null ? "not found" : btApp).append('\n');
+        b.append("Another source playing: ").append(showingOther ? "yes (card shows it)" : otherSince != 0 ? "maybe (checking)" : "no").append('\n');
         b.append("\nMedia sessions:\n");
         int n = 0;
         if (msm != null) {
@@ -733,8 +910,7 @@ public class MediaHub {
         List<String> og = MediaWatcher.ongoing();
         for (String o : og) b.append("  ").append(o).append('\n');
         if (og.isEmpty()) b.append("  none\n");
-        b.append("\nLast music broadcast: ").append(lastBroadcast).append('\n');
-        b.append("Showing: ").append(lastPkg == null ? "nothing" : lastPkg).append('\n');
+        b.append("\nShowing: ").append(lastPkg == null ? "nothing" : lastPkg).append('\n');
         String pref = player.preferredPackage();
         b.append("Your music app: ").append(pref == null ? "not chosen" : pref);
         return b.toString();
