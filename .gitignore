@@ -4,3 +4,7 @@
 build/
 *.apk
 .DS_Store
+
+# Beta builds are shipped from the repo (beta/Drift.apk)
+!beta/Drift.apk
+__pycache__/

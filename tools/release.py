@@ -28,21 +28,34 @@ if owner == "OWNER":
 args = [x for x in sys.argv[1:] if x != "--beta"]
 is_beta = "--beta" in sys.argv[1:] or "-beta" in name
 notes = args[0] if args else "Improvements and fixes."
+if is_beta:
+    apk = os.path.join(root, "..", "Drift-%s.apk" % name)  # betas: the test build, not the published Drift.apk
 sha = hashlib.sha256(open(apk, "rb").read()).hexdigest()
 tag = "v" + name  # standard release tags: v1.0.1, v1.1.0 ... (build 16 was published as build-16)
 info = {
     "versionCode": code,
     "versionName": name,
-    "apk": "https://github.com/%s/%s/releases/download/%s/Drift.apk" % (owner, repo, tag),
+    # betas live in the repo's beta/ folder (pushed with GitHub Desktop); stable builds on the Releases page
+    "apk": ("https://raw.githubusercontent.com/%s/%s/main/beta/Drift.apk" % (owner, repo)) if is_beta
+           else "https://github.com/%s/%s/releases/download/%s/Drift.apk" % (owner, repo, tag),
     "sha256": sha,
     "notes": notes,
 }
 out = os.path.join(root, "..", "release")
 os.makedirs(out, exist_ok=True)
-target = "beta.json" if is_beta else "update.json"
-with open(os.path.join(out, target), "w") as f:
-    json.dump(info, f, indent=2)
-print("Release tag:      ", tag, "(tick 'Set as a pre-release')" if is_beta else "")
-print("Attach this file:  Drift.apk")
-print("Then replace %s in %s/%s with release/%s" % (target, owner, repo, target))
+if is_beta:
+    # straight into the GitHub Desktop clone: commit and push, nothing else
+    import shutil
+    clone = os.path.join(root, "..", "Drift", "beta")
+    os.makedirs(clone, exist_ok=True)
+    shutil.copyfile(apk, os.path.join(clone, "Drift.apk"))
+    with open(os.path.join(clone, "beta.json"), "w") as f:
+        json.dump(info, f, indent=2)
+    print("Beta %s is in Drift/beta/. In GitHub Desktop: commit and push." % name)
+else:
+    with open(os.path.join(out, "update.json"), "w") as f:
+        json.dump(info, f, indent=2)
+    print("Release tag:      ", tag)
+    print("Attach this file:  Drift.apk")
+    print("Then replace update.json in %s/%s with release/update.json" % (owner, repo))
 print(json.dumps(info, indent=2))

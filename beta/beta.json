@@ -1,0 +1,7 @@
+{
+  "versionCode": 20,
+  "versionName": "1.1.1-beta.1",
+  "apk": "https://raw.githubusercontent.com/iambabarmanzoor/Drift/main/beta/Drift.apk",
+  "sha256": "42f907b3f3f1693866df48c9c6658518333ef29cbf64269c193a7cdf1dda4765",
+  "notes": "Test build: beta updates channel, Bluetooth music detection, card opens the app that's playing, USB removal fix, scrollable diagnostics, pull-down notifications, volume slider follows the knob."
+}

@@ -37,7 +37,7 @@ public final class Updater {
     /** Where update.json lives. Set to your GitHub repo (raw file URL). */
     public static final String UPDATE_URL = "https://raw.githubusercontent.com/iambabarmanzoor/Drift/main/update.json";
     /** Beta channel: test builds, read only by units with Beta updates switched on (hold About in Settings). */
-    public static final String BETA_URL = "https://raw.githubusercontent.com/iambabarmanzoor/Drift/main/beta.json";
+    public static final String BETA_URL = "https://raw.githubusercontent.com/iambabarmanzoor/Drift/main/beta/beta.json";
     private static final long AUTO_EVERY_MS = 6 * 60 * 60 * 1000L; // check at most every 6 hours on its own
 
     public interface Listener { void onUpdateState(); }
