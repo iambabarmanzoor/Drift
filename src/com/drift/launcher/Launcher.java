@@ -268,6 +268,7 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
 
     @Override protected void onResume() {
         super.onResume();
+        pausedNow = false;
         IntentFilter f = new IntentFilter();
         f.addAction(Intent.ACTION_TIME_TICK);
         f.addAction(Intent.ACTION_TIME_CHANGED);
@@ -307,6 +308,7 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
 
     @Override protected void onPause() {
         super.onPause();
+        pausedNow = true;
         try { unregisterReceiver(timeRx); } catch (Exception ignored) { }
         stopTicker();
         music.paused();
@@ -380,14 +382,108 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
         shortcuts.setPage(0, true);
     }
 
-    /** The button next to Home: Android's recent apps screen, where apps can be swiped away. */
+    // ---- recent apps
+    // Units with a custom system skin may ignore Android's "show recents" request (the button did nothing).
+    // Drift checks whether a recents screen actually covered it; if not, it tries the skin's own recents
+    // screen, then shows Drift's own list of apps opened from Drift.
+    private boolean pausedNow;
+    private static final int RECENTS_KEEP = 10;
+
+    private void rememberRecent(String pkg) {
+        if (pkg == null || pkg.equals(getPackageName())) return;
+        java.util.List<String> l = recentPkgs();
+        l.remove(pkg); l.add(0, pkg);
+        while (l.size() > RECENTS_KEEP) l.remove(l.size() - 1);
+        prefs.edit().putString("recentApps", android.text.TextUtils.join(",", l)).apply();
+    }
+
+    private java.util.List<String> recentPkgs() {
+        java.util.List<String> l = new java.util.ArrayList<>();
+        for (String p : prefs.getString("recentApps", "").split(",")) if (!p.isEmpty()) l.add(p);
+        return l;
+    }
+
+    private final Runnable recentsCheck = new Runnable() {
+        @Override public void run() {
+            if (pausedNow || !hasWindowFocus()) { prefs.edit().putInt("recentsMiss", 0).apply(); return; } // it opened
+            prefs.edit().putInt("recentsMiss", prefs.getInt("recentsMiss", 0) + 1).apply();
+            skinRecentsOrOwn();
+        }
+    };
+
+    private void skinRecentsOrOwn() {
+        if (openSkinRecents()) return;
+        showOwnRecents();
+    }
+
+    /** A system skin's own recents screen, if it has one other apps may open. */
+    private boolean openSkinRecents() {
+        try {
+            android.content.pm.PackageManager pm = getPackageManager();
+            for (android.content.pm.PackageInfo pi : pm.getInstalledPackages(0)) {
+                String pk = pi.packageName.toLowerCase(Locale.ROOT);
+                if (!pk.contains("systemui")) continue;
+                android.content.pm.PackageInfo full = pm.getPackageInfo(pi.packageName, android.content.pm.PackageManager.GET_ACTIVITIES);
+                if (full.activities == null) continue;
+                for (android.content.pm.ActivityInfo ai : full.activities) {
+                    if (!ai.exported || !ai.enabled || !ai.name.toLowerCase(Locale.ROOT).contains("recent")) continue;
+                    try {
+                        startActivity(new Intent().setClassName(ai.packageName, ai.name).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                        return true;
+                    } catch (Throwable ignored) { }
+                }
+            }
+        } catch (Throwable ignored) { }
+        return false;
+    }
+
+    /** Drift's own recent apps: apps opened from Drift, with Close / Close all. */
+    private void showOwnRecents() {
+        final android.content.pm.PackageManager pm = getPackageManager();
+        final java.util.List<String> pk = new java.util.ArrayList<>();
+        java.util.List<String> labels = new java.util.ArrayList<>();
+        java.util.List<android.graphics.drawable.Drawable> icons = new java.util.ArrayList<>();
+        for (String p : recentPkgs()) {
+            try {
+                android.content.pm.ApplicationInfo ai = pm.getApplicationInfo(p, 0);
+                if (pm.getLaunchIntentForPackage(p) == null) continue;
+                pk.add(p); labels.add(pm.getApplicationLabel(ai).toString()); icons.add(pm.getApplicationIcon(ai));
+            } catch (Throwable ignored) { }
+        }
+        final android.app.ActivityManager am = (android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE);
+        sheet.apps("Recent apps", labels.toArray(new String[0]), icons.toArray(new android.graphics.drawable.Drawable[0]),
+                "Apps you open from Drift show up here, so you can switch back or close them.",
+                new Sheet.OnApp() { @Override public void onApp(int i) {
+                    Intent li = pm.getLaunchIntentForPackage(pk.get(i));
+                    if (li != null) start(li);
+                } },
+                new Sheet.OnApp() { @Override public void onApp(int i) {
+                    closeApp(am, pk.get(i));
+                    toast("Closed", false);
+                } },
+                new Runnable() { @Override public void run() {
+                    for (String p : pk) closeApp(am, p);
+                    toast("Closed " + pk.size() + (pk.size() == 1 ? " app" : " apps"), false);
+                } });
+    }
+
+    private void closeApp(android.app.ActivityManager am, String pkg) {
+        try { am.killBackgroundProcesses(pkg); } catch (Throwable ignored) { }
+        java.util.List<String> l = recentPkgs();
+        l.remove(pkg);
+        prefs.edit().putString("recentApps", android.text.TextUtils.join(",", l)).apply();
+    }
+
+    /** The button next to Home: the unit's recent apps screen, or Drift's own when the unit's doesn't open. */
     private void openRecents() {
-        if (RecentsService.showRecents()) { recentsFails = 0; return; }
+        if (prefs.getInt("recentsMiss", 0) >= 2) { skinRecentsOrOwn(); return; } // this unit's system recents never opens
+        if (RecentsService.showRecents()) { recentsFails = 0; home.removeCallbacks(recentsCheck); home.postDelayed(recentsCheck, 1500); return; }
         if (RecentsService.isEnabled(this) && recentsFails++ == 0) {
             toast("Recent apps is starting, try again in a moment", false);
             return;
         }
         recentsFails = 0;
+        if (!RecentsService.isEnabled(this)) { showOwnRecents(); return; } // works without accessibility too
         openRecentsAccess();
     }
 
@@ -556,6 +652,7 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
         try {
             Bundle opts = from == null ? null : ActivityOptions.makeScaleUpAnimation(from, 0, 0, from.getWidth(), from.getHeight()).toBundle();
             startActivity(i, opts);
+            rememberRecent(a.cn.getPackageName());
             if (isMusicApp(a)) media.externalOpened(a.cn.getPackageName());
         } catch (Exception e) {
             toast("Can't open " + a.label, false);

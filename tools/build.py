@@ -42,6 +42,7 @@ MANIFEST = ("manifest", [P("package", T_STR, PKG), A("versionCode", T_DEC, 20), 
     ("uses-permission", [A("name", T_STR, "android.permission.INTERNET")], []),
     ("uses-permission", [A("name", T_STR, "android.permission.WAKE_LOCK")], []),
     ("uses-permission", [A("name", T_STR, "android.permission.EXPAND_STATUS_BAR")], []),
+    ("uses-permission", [A("name", T_STR, "android.permission.KILL_BACKGROUND_PROCESSES")], []),
     ("uses-feature", [A("name", T_STR, "android.hardware.location.gps"), A("required", T_BOOL, False)], []),
     ("application", [
         A("theme", T_REF, THEME_MATERIAL_NOACTIONBAR), A("label", T_STR, "Drift"), A("icon", T_REF, ICON_ID),

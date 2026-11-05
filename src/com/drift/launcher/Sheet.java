@@ -299,6 +299,56 @@ public class Sheet extends FrameLayout {
         if (im != null) im.hideSoftInputFromWindow(v.getWindowToken(), 0);
     }
 
+    public interface OnApp { void onApp(int index); }
+
+    /**
+     * Drift's own recent apps (for units whose system recents screen doesn't open): tap an app to
+     * switch to it, Close to stop it in the background, Close all for everything listed.
+     */
+    public void apps(String title, final String[] labels, android.graphics.drawable.Drawable[] icons, String empty,
+                     final OnApp open, final OnApp close, final Runnable closeAll) {
+        scale();
+        header(title, labels.length == 0 ? empty : null);
+        final LinearLayout list = new LinearLayout(getContext());
+        list.setOrientation(LinearLayout.VERTICAL);
+        for (int i = 0; i < labels.length; i++) {
+            final int idx = i;
+            final LinearLayout row = new LinearLayout(getContext());
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(Math.round(24 * s), 0, Math.round(18 * s), 0);
+            android.widget.ImageView iv = new android.widget.ImageView(getContext());
+            if (icons[i] != null) iv.setImageDrawable(icons[i]);
+            LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(Math.round(46 * s), Math.round(46 * s));
+            ip.rightMargin = Math.round(18 * s);
+            row.addView(iv, ip);
+            TextView t = text(labels[i], 20, Palette.TEXT, "sans-serif", false);
+            t.setSingleLine(true);
+            row.addView(t, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            TextView x = button("Close", false, new Runnable() {
+                @Override public void run() { close.onApp(idx); list.removeView(row); if (list.getChildCount() == 0) dismiss(); }
+            });
+            x.setTextSize(TypedValue.COMPLEX_UNIT_PX, 16 * s);
+            row.addView(x, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, Math.round(42 * s)));
+            StateListDrawable sl = new StateListDrawable();
+            sl.addState(new int[] { android.R.attr.state_pressed }, new ColorDrawable(0x14FFFFFF));
+            sl.addState(new int[] {}, new ColorDrawable(0));
+            row.setBackground(sl);
+            row.setOnClickListener(new OnClickListener() { @Override public void onClick(View v) { dismiss(); open.onApp(idx); } });
+            list.addView(row, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, Math.round(70 * s)));
+        }
+        if (labels.length > 0) {
+            android.widget.ScrollView sv = new android.widget.ScrollView(getContext());
+            sv.addView(list);
+            card.addView(sv, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, Math.round(Math.min(labels.length * 70, 420) * s)));
+            card.addView(buttons(
+                    button("Close all", false, new Runnable() { @Override public void run() { dismiss(); closeAll.run(); } }),
+                    button("Done", true, new Runnable() { @Override public void run() { dismiss(); } })));
+        } else {
+            card.addView(buttons(button("OK", true, new Runnable() { @Override public void run() { dismiss(); } })));
+        }
+        show();
+    }
+
     private static final Runnable NOOP = new Runnable() { @Override public void run() { } };
 
     private void show() {
