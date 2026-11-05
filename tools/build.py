@@ -32,7 +32,7 @@ def A(name, typ, val):  # android-namespaced attribute
 def P(name, typ, val):  # attribute without namespace
     return (None, name, typ, val)
 
-MANIFEST = ("manifest", [P("package", T_STR, PKG), A("versionCode", T_DEC, 21), A("versionName", T_STR, "1.1.1")], [
+MANIFEST = ("manifest", [P("package", T_STR, PKG), A("versionCode", T_DEC, 22), A("versionName", T_STR, "1.1.2-beta.1")], [
     ("uses-sdk", [A("minSdkVersion", T_DEC, 23), A("targetSdkVersion", T_DEC, 25)], []),
     ("uses-permission", [A("name", T_STR, "android.permission.BLUETOOTH")], []),
     ("uses-permission", [A("name", T_STR, "android.permission.ACCESS_NETWORK_STATE")], []),

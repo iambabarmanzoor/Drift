@@ -136,12 +136,6 @@ public class MusicService extends Service implements MediaPlayer.OnPreparedListe
         }
     }
 
-    /**
-     * Another source is playing (Bluetooth, radio, another app) and Drift Music is paused: let go of the
-     * media keys so the steering-wheel and card buttons reach that source instead of waking Drift Music.
-     * Pressing play in Drift Music takes them back.
-     */
-    public void yieldMediaKeys() { if (!isPlaying() && session.isActive()) session.setActive(false); }
     public MusicLibrary.Song current() { return hasSong() ? queue.get(index) : null; }
     public List<MusicLibrary.Song> queue() { return queue; }
     public int index() { return index; }

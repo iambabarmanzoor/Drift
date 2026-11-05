@@ -1,7 +1,7 @@
 {
-  "versionCode": 20,
-  "versionName": "1.1.1-beta.1",
+  "versionCode": 22,
+  "versionName": "1.1.2-beta.1",
   "apk": "https://raw.githubusercontent.com/iambabarmanzoor/Drift/main/beta/Drift.apk",
-  "sha256": "b2949d2285ebc951cd0ad491e71eb5b7974a626c9aa831e6a4c49151678d889f",
-  "notes": "Test build: beta updates channel, Bluetooth music detection, card opens the app that's playing, recent apps works on units whose system recents doesn't open, USB removal fix, scrollable diagnostics, pull-down notifications, volume slider follows the knob."
+  "sha256": "274898416c5bff948c95a1f07bacbd8a24580f5d3b8406747e26cda47f4d5fc4",
+  "notes": "Test build: Bluetooth music rebuilt to Android's standards. The card shows the phone's song and state from Android's Bluetooth service, buttons go only to what's playing (Drift Music never starts by itself), a tap opens BT Music, and diagnostics show the real Android version."
 }

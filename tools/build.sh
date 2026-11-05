@@ -10,9 +10,16 @@ ANDROID_JAR="${ANDROID_JAR:-$SDKJ/com.android.android-23.jar}"
 OUT="${OUT:-build}"
 rm -rf "$OUT" && mkdir -p "$OUT/classes"
 
+# Compile-time stubs for a few newer Android APIs (tools/stubs): compiled first, put ahead of the
+# platform library, and never packaged. The device's real classes are used at runtime.
+mkdir -p "$OUT/stubs"
 java -cp "$SDKJ/ecj.jar" org.eclipse.jdt.internal.compiler.batch.Main \
   -source 8 -target 8 -nowarn -encoding UTF-8 \
-  -bootclasspath "$ANDROID_JAR" -d "$OUT/classes" $(find src -name "*.java")
+  -bootclasspath "$ANDROID_JAR" -d "$OUT/stubs" $(find tools/stubs -name "*.java")
+
+java -cp "$SDKJ/ecj.jar" org.eclipse.jdt.internal.compiler.batch.Main \
+  -source 8 -target 8 -nowarn -encoding UTF-8 \
+  -bootclasspath "$OUT/stubs:$ANDROID_JAR" -d "$OUT/classes" $(find src -name "*.java")
 
 java -jar "$SDKJ/com.android.dx.jar" --dex --min-sdk-version=23 \
   --output="$OUT/classes.dex" "$OUT/classes"

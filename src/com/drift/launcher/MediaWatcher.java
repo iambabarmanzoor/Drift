@@ -44,6 +44,10 @@ public class MediaWatcher extends NotificationListenerService {
         public android.app.PendingIntent[] actions;
         public String[] actionTitles;
         public int[] compact;
+        /** What the notification itself opens when tapped (the app's own choice of screen). */
+        public android.app.PendingIntent contentIntent;
+        /** The player keeps this notification up while it has playback (ongoing). */
+        public boolean ongoing;
         Entry(String pkg, MediaSession.Token token, String title, String text, Bitmap art, long when) {
             this.pkg = pkg; this.token = token; this.title = title; this.text = text; this.art = art; this.when = when;
         }
@@ -167,6 +171,8 @@ public class MediaWatcher extends NotificationListenerService {
                     }
                 }
                 if (x != null) en.compact = x.getIntArray(Notification.EXTRA_COMPACT_ACTIONS);
+                en.contentIntent = n.contentIntent;
+                en.ongoing = (n.flags & Notification.FLAG_ONGOING_EVENT) != 0;
                 if (x != null) {
                     StringBuilder ks = new StringBuilder();
                     for (String kk : x.keySet()) {

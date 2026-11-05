@@ -653,7 +653,7 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
             Bundle opts = from == null ? null : ActivityOptions.makeScaleUpAnimation(from, 0, 0, from.getWidth(), from.getHeight()).toBundle();
             startActivity(i, opts);
             rememberRecent(a.cn.getPackageName());
-            if (isMusicApp(a)) media.externalOpened(a.cn.getPackageName());
+            if (isMusicApp(a)) media.externalOpened(a.cn);
         } catch (Exception e) {
             toast("Can't open " + a.label, false);
         }
@@ -769,10 +769,7 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
         return null;
     }
 
-    @Override public void returnHome() {
-        try { startActivity(new Intent(this, Launcher.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)); }
-        catch (Exception ignored) { }
-    }
+
 
     @Override public void needStorage() {
         // ask on first need, and again (once per start) until the user says "don't ask again"
@@ -864,15 +861,10 @@ public class Launcher extends Activity implements DrawerView.Host, MediaCard.Act
     @Override public void onSeek(long ms) { media.seekTo(ms); }
 
     @Override public void onCardTap() {
-        String pkg = media.playingPackage();
-        // another source is playing and Drift can't tell which app: open All Apps, never Drift Music
-        if (pkg == null && media.showingOther()) { drawer.show(-1); return; }
-        if (getPackageName().equals(pkg) || (pkg == null && driftMusic())) { openMusic(); return; }
+        int r = media.openCurrent(); // the shown app's own screen (e.g. "BT Music", not "Bluetooth")
+        if (r == MediaHub.OPEN_DONE) return;
+        if (r == MediaHub.OPEN_DRIFT_MUSIC || driftMusic()) { openMusic(); return; }
         if (!MediaHub.hasAccess(this) || !MediaWatcher.connected) { askAccess(); return; }
-        if (pkg != null) {
-            Intent i = getPackageManager().getLaunchIntentForPackage(pkg);
-            if (i != null && start(i)) return;
-        }
         launchPreferred();
     }
 
