@@ -313,21 +313,30 @@ public class MediaHub {
 
         boolean media = mediaAudioActive(ownPlaying);
 
-        // 3. a notification-only player while media audio plays
+        // 3. a notification-only player that is playing: its own play/pause button says so
+        //    (a "Pause" button means playing); if its buttons don't tell, media audio decides
         MediaWatcher.Entry n = noteOnly(notes);
-        if (n != null && media) { showNote(n, true, "notification, audio playing"); return; }
+        Boolean noteSays = n == null ? null : noteSaysPlaying(n);
+        if (n != null && (Boolean.TRUE.equals(noteSays) || (noteSays == null && media))) { showNote(n, true, "notification player, playing"); return; }
 
         // 4. an older player that says it is playing (only while media audio really plays: these
         //    broadcasts stop when an app dies, so "playing" alone can go stale)
         if (!media) bcPlaying = false;
         if (bcPlaying && bcTitle != null) { showBroadcast(true); return; }
 
-        // 5. media audio nobody reports
+        // 5. a phone is connected over Bluetooth: audio no app reports is the phone's, so show the
+        //    phone's song with the state its session reports (never a guessed "playing")
+        if (media && bt.phoneConnected()) {
+            for (MediaController m : list) if (bt.isBluetoothSession(m) && hasSong(m)) { showSession(m, "Bluetooth, audio on"); return; }
+            if (bt.trackMetadata() != null) { showBluetoothTrack(bt.streaming()); return; }
+        }
+
+        // 6. media audio nobody reports
         if (media) { showOther(); return; }
 
-        // 6. paused: keep what was shown, else your music app, else any session with a song
+        // 7. paused: keep what was shown, else your music app, else any session with a song
         if (kind == BT_TRACK && bt.phoneConnected() && bt.trackMetadata() != null) { showBluetoothTrack(false); return; }
-        if (kind == NOTE && n != null) { showNote(n, false, "notification, paused"); return; }
+        if (kind == NOTE && n != null) { showNote(n, false, "notification player, paused"); return; }
         if (kind == BROADCAST && bcTitle != null) { showBroadcast(false); return; }
         if (lastToken != null) for (MediaController m : list) if (m.getSessionToken().equals(lastToken) && hasSong(m)) { showSession(m, "paused, shown last"); return; }
         String pref = player.preferredPackage();
@@ -377,6 +386,30 @@ public class MediaHub {
             if (pick == null || e.when > pick.when) pick = e;
         }
         return pick;
+    }
+
+    /**
+     * TransportControls.prepare() (public API since Android 7, API 24). Drift compiles against the
+     * Android 6 library, so it is called by name; on Android 6 there is nothing to call.
+     */
+    private static void prepare(MediaController.TransportControls t) {
+        if (Build.VERSION.SDK_INT < 24) return;
+        try { MediaController.TransportControls.class.getMethod("prepare").invoke(t); } catch (Throwable ignored) { }
+    }
+
+    /**
+     * A notification-only player's state, read from its own play/pause button: players show "Pause"
+     * while playing and "Play" while paused. Null when its buttons don't say.
+     */
+    private static Boolean noteSaysPlaying(MediaWatcher.Entry e) {
+        if (e.actionTitles == null) return null;
+        boolean play = false;
+        for (String t0 : e.actionTitles) {
+            String t = t0.toLowerCase(Locale.ROOT);
+            if (t.contains("pause") || t.contains("暂停")) return Boolean.TRUE;
+            if (t.contains("play") || t.contains("播放")) play = true;
+        }
+        return play ? Boolean.FALSE : null;
     }
 
     private static boolean isPlaying(MediaController m) {
@@ -580,8 +613,16 @@ public class MediaHub {
                 // Android does, through its media browser service, which wakes it first. Drift Music and
                 // the phone over Bluetooth are always awake: plain play.
                 String pkg = controller.getPackageName();
-                if (bt.isBluetoothSession(controller) || ctx.getPackageName().equals(pkg) || !resume(pkg, controller))
-                    controller.getTransportControls().play();
+                if (bt.isBluetoothSession(controller)) {
+                    // Android plays the phone's audio only while its Bluetooth app holds audio focus.
+                    // Its music service takes focus on "prepare" (Android 9: onPrepare -> requestAudioFocus),
+                    // so a media app sends prepare, then play. Play alone resumes the phone silently.
+                    MediaController.TransportControls t = controller.getTransportControls();
+                    prepare(t);
+                    t.play();
+                    return;
+                }
+                if (ctx.getPackageName().equals(pkg) || !resume(pkg, controller)) controller.getTransportControls().play();
                 return;
             }
             case NOTE: if (!noteAction(note, A_PLAY)) mediaButton(shownPkg, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE); return;

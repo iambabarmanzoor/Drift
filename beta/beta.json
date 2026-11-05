@@ -1,7 +1,7 @@
 {
-  "versionCode": 22,
-  "versionName": "1.1.2-beta.1",
+  "versionCode": 23,
+  "versionName": "1.1.2-beta.2",
   "apk": "https://raw.githubusercontent.com/iambabarmanzoor/Drift/main/beta/Drift.apk",
-  "sha256": "274898416c5bff948c95a1f07bacbd8a24580f5d3b8406747e26cda47f4d5fc4",
-  "notes": "Test build: Bluetooth music rebuilt to Android's standards. The card shows the phone's song and state from Android's Bluetooth service, buttons go only to what's playing (Drift Music never starts by itself), a tap opens BT Music, and diagnostics show the real Android version."
+  "sha256": "d212ee438d507870167c1dbf12b69a10016c1b7882fe97bfa52fd63450abda26",
+  "notes": "Test build: playing Bluetooth from Drift now takes the car's audio for Bluetooth first (no more silent playback), the card keeps showing the phone's song when paused, and notification-only players show their real play/pause state."
 }
