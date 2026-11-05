@@ -13,7 +13,7 @@ Designed and built by **Babar Manzoor**. © 2026 Babar Manzoor. All rights reser
 - **Speed:** read from the unit's GPS.
 - **Appearance:** 7 accent colours, music card on the left or right, road motion that follows your speed and a moving glow on the dock.
 - **Recent apps button.**
-- **Updates:** installs over the internet, so no USB stick is needed after the first install.
+- **Updates:** installs over the internet, so no USB stick is needed after the first install. Want test builds early? Hold **About** in Settings to switch on beta updates (and again to switch them off).
 
 ## Install
 
